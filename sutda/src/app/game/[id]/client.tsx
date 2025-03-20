@@ -122,26 +122,22 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
           fetchGameState();
         });
         
-      // 메시지 구독
-      const messagesChannel = supabase
-        .channel(`game-${gameId}-messages`)
-        .on('postgres_changes', {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          filter: `game_id=eq.${gameId}`
-        }, (payload) => {
-          console.log('새 메시지 감지:', payload.new);
-          // 메시지 추가 (중복 방지 로직 제거 - user_id로 구분하기 때문에 중복 발생 가능성 낮음)
-          const newMessage = payload.new as Message;
-          setMessages(prev => {
-            // 이미 같은 ID의 메시지가 있는지 확인하여 중복 방지
-            if (prev.some(msg => msg.id === newMessage.id)) {
-              return prev;
-            }
-            return [...prev, newMessage];
+        // 채팅 브로드캐스트 구독 (실시간 메시지 수신)
+        const chatChannel = supabase
+          .channel(`chat-${gameId}`)
+          .on('broadcast', { event: 'new-message' }, (payload) => {
+            console.log('브로드캐스트 메시지 수신:', payload);
+            
+            // 새 메시지 추가 (중복 방지)
+            const newMessage = payload.payload as Message;
+            setMessages(prev => {
+              // 이미 같은 ID의 메시지가 있는지 확인
+              if (prev.some(msg => msg.id === newMessage.id)) {
+                return prev;
+              }
+              return [...prev, newMessage];
+            });
           });
-        });
       
       // 채널 구독 시작 및 상태 모니터링
       gameChannel.subscribe((status) => {
@@ -168,11 +164,11 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
         }
       });
       
-      messagesChannel.subscribe((status) => {
-        console.log(`메시지 채널 상태: ${status}`);
+      chatChannel.subscribe((status) => {
+        console.log(`채팅 채널 상태: ${status}`);
         if (status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') {
-          console.log('메시지 채널 재연결 시도...');
-          messagesChannel.subscribe();
+          console.log('채팅 채널 재연결 시도...');
+          chatChannel.subscribe();
         }
       });
       
@@ -185,7 +181,7 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
         supabase.removeChannel(gameChannel);
         supabase.removeChannel(playersChannel);
         supabase.removeChannel(actionsChannel);
-        supabase.removeChannel(messagesChannel);
+        supabase.removeChannel(chatChannel);
         setIsSubscribed(false);
         console.log('실시간 구독이 정리되었습니다.');
       };

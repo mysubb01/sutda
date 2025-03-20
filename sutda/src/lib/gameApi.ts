@@ -445,21 +445,39 @@ export async function sendMessage(gameId: string, playerId: string, content: str
     console.error('플레이어 정보 조회 오류:', playerError);
     throw new Error('플레이어 정보를 찾을 수 없습니다.');
   }
+
+  // 메시지 ID 생성
+  const messageId = uuidv4();
+  const timestamp = new Date().toISOString();
+  
+  // 메시지 객체 생성
+  const messageData = {
+    id: messageId,
+    game_id: gameId,
+    user_id: playerData.user_id,
+    username: playerData.username,
+    content: content,
+    created_at: timestamp
+  };
   
   // 메시지 저장
   const { error: messageError } = await supabase
     .from('messages')
-    .insert({
-      game_id: gameId,
-      user_id: playerData.user_id,
-      username: playerData.username,
-      content: content
-    });
+    .insert(messageData);
   
   if (messageError) {
     console.error('메시지 저장 오류:', messageError);
     throw new Error('메시지를 전송할 수 없습니다: ' + messageError.message);
   }
+  
+  // 브로드캐스트 채널로 메시지 전송 (실시간 알림)
+  const channel = supabase.channel(`chat-${gameId}`);
+  channel.subscribe();
+  channel.send({
+    type: 'broadcast',
+    event: 'new-message',
+    payload: messageData
+  });
 }
 
 /**
