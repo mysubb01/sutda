@@ -3,7 +3,7 @@
 import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { createGame, joinGame } from '@/lib/gameApi';
+import { createGame } from '@/lib/gameApi';
 
 export default function NewGame() {
   const router = useRouter();
@@ -23,17 +23,15 @@ export default function NewGame() {
     setError(null);
     
     try {
-      // 새 게임 생성
-      const gameId = await createGame();
+      // 새 게임 생성 (사용자 정보 포함)
+      const { gameId, playerId } = await createGame(username);
       
-      // 랜덤 유저 ID 생성 (실제 애플리케이션에서는 인증 시스템 사용)
-      const userId = `user_${Math.random().toString(36).substring(2, 9)}`;
-      
-      // 생성된 게임에 참가
-      await joinGame(gameId, userId, username);
+      // 로컬 스토리지에 플레이어 정보 저장
+      localStorage.setItem(`game_${gameId}_player_id`, playerId);
+      localStorage.setItem(`game_${gameId}_username`, username);
       
       // 게임 화면으로 이동
-      router.push(`/game/${gameId}?userId=${userId}&username=${username}`);
+      router.push(`/game/${gameId}`);
     } catch (err) {
       console.error('게임 생성 오류:', err);
       setError('게임을 생성하는 중 오류가 발생했습니다. 다시 시도해주세요.');

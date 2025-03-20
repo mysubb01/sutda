@@ -108,7 +108,7 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
 
   if (isGameFinished) {
     return (
-      <div className="p-6 bg-gray-700 bg-opacity-80 rounded-lg border border-yellow-500">
+      <div className="p-6 bg-gray-900 bg-opacity-90 rounded-lg border border-yellow-500 shadow-lg">
         <h2 className="text-2xl font-bold text-center mb-4 text-yellow-400">게임 종료</h2>
         {winnerName && (
           <div className="text-center">
@@ -117,7 +117,7 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
           </div>
         )}
         <button
-          className="mt-4 w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-md"
+          className="mt-4 w-full py-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white font-bold rounded-md shadow-lg transition-all"
           onClick={() => window.location.href = '/'}
         >
           홈으로 돌아가기
@@ -128,7 +128,7 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
 
   if (isGameWaiting) {
     return (
-      <div className="p-6 bg-gray-700 bg-opacity-80 rounded-lg border border-yellow-500">
+      <div className="p-6 bg-gray-900 bg-opacity-90 rounded-lg border border-yellow-500 shadow-lg">
         <h2 className="text-2xl font-bold text-center mb-4 text-yellow-400">게임 대기 중</h2>
         <p className="text-gray-300 text-center mb-4">현재 {gameState.players.length}명의 플레이어가 대기 중입니다.</p>
         
@@ -140,7 +140,7 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
         
         <div className="text-center">
           <button
-            className={`py-3 px-6 bg-green-600 hover:bg-green-700 text-white font-bold rounded-md ${
+            className={`py-3 px-6 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-500 hover:to-green-600 text-white font-bold rounded-md shadow-lg transition-all ${
               isLoading ? 'opacity-50 cursor-not-allowed' : ''
             }`}
             onClick={handleStartGame}
@@ -164,7 +164,7 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
 
   if (isGamePlaying) {
     return (
-      <div className="p-6 bg-gray-700 bg-opacity-80 rounded-lg border border-yellow-500">
+      <div className="p-6 bg-gray-900 bg-opacity-90 rounded-lg border border-yellow-500 shadow-lg">
         <h2 className="text-2xl font-bold text-center mb-4 text-yellow-400">게임 진행 중</h2>
         
         <div className="mb-4">
@@ -199,10 +199,10 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
               />
             </div>
             
-            <div className="grid grid-cols-3 gap-2 mt-3">
+            <div className="grid grid-cols-3 gap-3 mt-3">
               <button
-                className={`relative h-12 overflow-hidden ${
-                  isLoading ? 'opacity-50 cursor-not-allowed' : ''
+                className={`relative h-12 overflow-hidden rounded-lg ${
+                  isLoading ? 'opacity-50 cursor-not-allowed' : 'transform hover:scale-105 transition-transform'
                 }`}
                 onClick={handleBet}
                 disabled={isLoading || !currentPlayer || betAmount <= 0 || betAmount > currentPlayer.balance}
@@ -214,12 +214,12 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
                   height={48}
                   className="w-full h-full object-contain"
                 />
-                <span className="absolute inset-0 flex items-center justify-center text-white font-bold">베팅</span>
+                <span className="absolute inset-0 flex items-center justify-center text-white font-bold drop-shadow-lg">베팅</span>
               </button>
               
               <button
-                className={`relative h-12 overflow-hidden ${
-                  isLoading ? 'opacity-50 cursor-not-allowed' : ''
+                className={`relative h-12 overflow-hidden rounded-lg ${
+                  isLoading ? 'opacity-50 cursor-not-allowed' : 'transform hover:scale-105 transition-transform'
                 }`}
                 onClick={handleCall}
                 disabled={isLoading}
@@ -231,12 +231,12 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
                   height={48}
                   className="w-full h-full object-contain"
                 />
-                <span className="absolute inset-0 flex items-center justify-center text-white font-bold">콜</span>
+                <span className="absolute inset-0 flex items-center justify-center text-white font-bold drop-shadow-lg">콜</span>
               </button>
               
               <button
-                className={`relative h-12 overflow-hidden ${
-                  isLoading ? 'opacity-50 cursor-not-allowed' : ''
+                className={`relative h-12 overflow-hidden rounded-lg ${
+                  isLoading ? 'opacity-50 cursor-not-allowed' : 'transform hover:scale-105 transition-transform'
                 }`}
                 onClick={handleDie}
                 disabled={isLoading}
@@ -248,19 +248,19 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
                   height={48}
                   className="w-full h-full object-contain"
                 />
-                <span className="absolute inset-0 flex items-center justify-center text-white font-bold">다이</span>
+                <span className="absolute inset-0 flex items-center justify-center text-white font-bold drop-shadow-lg">다이</span>
               </button>
             </div>
           </div>
         ) : (
-          <p className="text-center text-gray-300">다른 플레이어의 차례입니다.</p>
+          <p className="text-center text-gray-300 py-3 border border-gray-700 rounded-lg bg-gray-800 bg-opacity-50">다른 플레이어의 차례입니다.</p>
         )}
       </div>
     );
   }
 
   return (
-    <div className="p-6 bg-gray-700 bg-opacity-80 rounded-lg border border-yellow-500">
+    <div className="p-6 bg-gray-900 bg-opacity-90 rounded-lg border border-yellow-500 shadow-lg">
       <p className="text-center text-gray-300">게임 상태를 불러오는 중...</p>
     </div>
   );

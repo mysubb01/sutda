@@ -1,227 +1,301 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
-import { GameState } from '@/types/game';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { GameState, Message } from '@/types/game';
 import { getGameState, joinGame } from '@/lib/gameApi';
-import { supabase } from '@/lib/supabase';
-import { subscribeToGameUpdates, subscribeToMessages } from '@/lib/realtimeUtils';
 import { GameTable } from '@/components/GameTable';
-import { Chat } from '@/components/Chat';
 import { GameControls } from '@/components/GameControls';
-import { CardPair } from '@/components/Card';
-import { evaluateCards } from '@/utils/gameLogic';
+import { Chat } from '@/components/Chat';
+import { supabase } from '@/lib/supabase';
 import { RealtimeChannel } from '@supabase/supabase-js';
 
-type GamePageClientProps = {
+interface ClientGamePageProps {
   gameId: string;
 }
 
-export default function GamePageClient({ gameId }: GamePageClientProps) {
-  const searchParams = useSearchParams();
+export default function ClientGamePage({ gameId }: ClientGamePageProps) {
   const router = useRouter();
-  const userId = searchParams.get('userId') || '';
-  const username = searchParams.get('username') || '';
-  
   const [gameState, setGameState] = useState<GameState | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [playerId, setPlayerId] = useState<string | null>(null);
+  const [username, setUsername] = useState<string>('');
+  const [isJoining, setIsJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showAllCards, setShowAllCards] = useState(false);
-  const [gameChannel, setGameChannel] = useState<RealtimeChannel | null>(null);
-  const [messageChannel, setMessageChannel] = useState<RealtimeChannel | null>(null);
-
-  // 게임 상태 불러오기
-  const fetchGameState = useCallback(async () => {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [isSubscribed, setIsSubscribed] = useState(false);
+  
+  // 메시지 불러오기
+  const fetchMessages = async () => {
     try {
-      const state = await getGameState(gameId);
-      setGameState(state);
-      setError(null);
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('game_id', gameId)
+        .order('created_at', { ascending: true });
 
-      // 게임이 종료된 경우 카드 공개
-      if (state.status === 'finished') {
-        setShowAllCards(true);
+      if (!error && data) {
+        setMessages(data);
+      } else {
+        console.error('메시지 불러오기 오류:', error);
       }
     } catch (err) {
-      console.error('게임 상태 불러오기 오류:', err);
-      setError('게임 정보를 불러올 수 없습니다.');
-    } finally {
-      setIsLoading(false);
+      console.error('메시지 불러오기 예외:', err);
+    }
+  };
+  
+  // 게임 상태 불러오기
+  const fetchGameState = async () => {
+    try {
+      const data = await getGameState(gameId);
+      setGameState(data);
+      return data;
+    } catch (err) {
+      console.error('게임 상태 불러오기 실패:', err);
+      setError('게임 정보를 불러오는 중 오류가 발생했습니다.');
+      return null;
+    }
+  };
+  
+  // 게임 참가 및 구독 설정
+  useEffect(() => {
+    // 로컬 스토리지에서 플레이어 정보 가져오기
+    const storedPlayerId = localStorage.getItem(`game_${gameId}_player_id`);
+    const storedUsername = localStorage.getItem(`game_${gameId}_username`);
+    
+    if (storedPlayerId && storedUsername) {
+      console.log('저장된 플레이어 정보 발견:', storedPlayerId, storedUsername);
+      setPlayerId(storedPlayerId);
+      setUsername(storedUsername);
+      fetchGameState();
+      fetchMessages();
+      setupSubscriptions(storedPlayerId);
     }
   }, [gameId]);
-
-  // 게임 참가 처리
-  const handleJoinGame = async () => {
-    if (!userId || !username) {
-      alert('사용자 정보가 없습니다. 홈 페이지로 이동합니다.');
-      router.push('/');
-      return;
-    }
+  
+  // 실시간 구독 설정
+  const setupSubscriptions = (pid: string) => {
+    console.log('실시간 구독 설정 시작...');
+    
+    // 중복 구독 방지
+    if (isSubscribed) return;
     
     try {
-      setIsLoading(true);
-      await joinGame(gameId, userId, username);
-      await fetchGameState();
+      // 게임 상태 변경 구독
+      const gameChannel = supabase
+        .channel(`game-${gameId}-changes`)
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'games',
+          filter: `id=eq.${gameId}`
+        }, (payload) => {
+          console.log('게임 상태 변경 감지:', payload);
+          fetchGameState();
+        });
+        
+      // 플레이어 변경 구독  
+      const playersChannel = supabase
+        .channel(`game-${gameId}-players`)
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'players',
+          filter: `game_id=eq.${gameId}`
+        }, (payload) => {
+          console.log('플레이어 변경 감지:', payload);
+          fetchGameState();
+        });
+        
+      // 게임 액션 구독
+      const actionsChannel = supabase
+        .channel(`game-${gameId}-actions`)
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'game_actions',
+          filter: `game_id=eq.${gameId}`
+        }, (payload) => {
+          console.log('게임 액션 감지:', payload);
+          fetchGameState();
+        });
+        
+      // 메시지 구독
+      const messagesChannel = supabase
+        .channel(`game-${gameId}-messages`)
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `game_id=eq.${gameId}`
+        }, (payload) => {
+          console.log('새 메시지 감지:', payload);
+          // 내가 보낸 메시지가 아닌 경우에만 추가 (중복 방지)
+          if (payload.new.player_id !== pid) {
+            setMessages(prev => [...prev, payload.new as Message]);
+          }
+        });
+      
+      // 채널 구독 시작
+      Promise.all([
+        gameChannel.subscribe((status) => console.log(`게임 채널 상태: ${status}`)),
+        playersChannel.subscribe((status) => console.log(`플레이어 채널 상태: ${status}`)),
+        actionsChannel.subscribe((status) => console.log(`액션 채널 상태: ${status}`)),
+        messagesChannel.subscribe((status) => console.log(`메시지 채널 상태: ${status}`))
+      ]);
+      
+      setIsSubscribed(true);
+      console.log('모든 실시간 구독이 설정되었습니다.');
+      
+      // 컴포넌트 언마운트 시 구독 정리
+      return () => {
+        supabase.removeChannel(gameChannel);
+        supabase.removeChannel(playersChannel);
+        supabase.removeChannel(actionsChannel);
+        supabase.removeChannel(messagesChannel);
+        console.log('실시간 구독이 정리되었습니다.');
+      };
     } catch (err) {
-      console.error('게임 참가 오류:', err);
-      setError('게임에 참가할 수 없습니다.');
-    } finally {
-      setIsLoading(false);
+      console.error('실시간 구독 설정 중 오류:', err);
     }
   };
 
-  // 새 메시지 수신 처리
-  const handleNewMessage = useCallback((payload: any) => {
-    console.log('새 메시지 수신됨', payload);
-  }, []);
-
-  useEffect(() => {
-    console.log('Setting up game with ID:', gameId);
+  // 게임 참가 처리
+  const handleJoinGame = async (username: string) => {
+    if (!username.trim()) {
+      setError('닉네임을 입력해주세요.');
+      return;
+    }
+    
+    setIsJoining(true);
+    setError(null);
+    
+    try {
+      const { playerId: newPlayerId, gameState: newGameState } = await joinGame(gameId, username);
+      
+      // 플레이어 정보 저장
+      localStorage.setItem(`game_${gameId}_player_id`, newPlayerId);
+      localStorage.setItem(`game_${gameId}_username`, username);
+      
+      setPlayerId(newPlayerId);
+      setUsername(username);
+      setGameState(newGameState);
+      
+      // 최초 참가 시 메시지 불러오기
+      fetchMessages();
+      
+      // 실시간 구독 설정
+      setupSubscriptions(newPlayerId);
+    } catch (err) {
+      console.error('게임 참가 오류:', err);
+      setError('게임 참가 중 오류가 발생했습니다.');
+    } finally {
+      setIsJoining(false);
+    }
+  };
+  
+  // 액션 후 게임 상태 갱신
+  const handleAfterAction = () => {
     fetchGameState();
-    
-    // 실시간 업데이트 구독
-    const gameSubscription = subscribeToGameUpdates(
-      gameId,
-      (payload) => {
-        console.log('Game state updated:', payload);
-        fetchGameState();
-      },
-      (payload) => {
-        console.log('Player updated:', payload);
-        fetchGameState();
-      },
-      (payload) => {
-        console.log('Action received:', payload);
-        fetchGameState();
-      }
-    );
-    
-    const msgSubscription = subscribeToMessages(
-      gameId,
-      (payload) => {
-        console.log('Message received in game component:', payload);
-        handleNewMessage(payload);
-      }
-    );
-    
-    setGameChannel(gameSubscription);
-    setMessageChannel(msgSubscription);
-
-    return () => {
-      if (gameSubscription) {
-        console.log('Removing game subscription');
-        supabase.removeChannel(gameSubscription);
-      }
-      if (msgSubscription) {
-        console.log('Removing message subscription');
-        supabase.removeChannel(msgSubscription);
-      }
-    };
-  }, [gameId, fetchGameState, handleNewMessage]);
+  };
   
-  // 현재 플레이어의 카드 정보
-  const currentPlayer = gameState?.players.find(p => p.id === userId);
-  let cardCombination = null;
-  
-  if (currentPlayer?.cards && currentPlayer.cards.length === 2) {
-    cardCombination = evaluateCards(currentPlayer.cards);
-  }
-
-  if (isLoading) {
+  // 이미 참가한 상태이고 게임 상태가 로드된 경우
+  if (playerId && gameState) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-800 text-white">
-        <div className="text-center">
-          <p className="text-xl">게임을 불러오는 중...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (error || !gameState) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-800 text-white">
-        <div className="text-center">
-          <p className="text-xl text-red-500 mb-4">{error || '게임을 찾을 수 없습니다.'}</p>
-          <button
-            onClick={() => router.push('/')}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md"
-          >
-            홈으로 돌아가기
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div 
-      className="min-h-screen text-white p-4 relative"
-      style={{
-        backgroundImage: 'url(/images/ui/bgM.png)',
-        backgroundSize: 'cover',
-        backgroundPosition: 'center'
-      }}
-    >
-      <div className="absolute inset-0 bg-black bg-opacity-60"></div>
-      <div className="max-w-6xl mx-auto relative z-10">
-        <h1 className="text-3xl font-bold mb-2 text-center text-yellow-400">한국식 포커 - 섯다</h1>
+      <div className="min-h-screen w-full bg-gray-950 relative overflow-hidden">
+        {/* 테이블 배경 효과 */}
+        <div 
+          className="absolute inset-0 overflow-hidden"
+          style={{
+            background: 'linear-gradient(to bottom, #1a2035, #0a0a1a)',
+            backgroundImage: 'url(/images/table/bgM.png)',
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            filter: 'blur(8px)',
+            opacity: 0.3,
+            transform: 'scale(1.1)'
+          }}
+        />
         
-        {/* 게임 ID와 정보 */}
-        <div className="mb-6 text-center">
-          <p className="text-sm text-gray-300">게임 ID: {gameId} | 상태: {translateStatus(gameState.status)}</p>
-        </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          {/* 왼쪽: 게임 테이블과 컨트롤 */}
-          <div className="md:col-span-3 space-y-4">
-            {/* 게임 테이블 */}
-            <GameTable 
-              gameState={gameState}
-              currentUserId={userId}
-              onJoin={handleJoinGame}
-            />
+        <div className="container mx-auto p-4 relative z-10">
+          <div className="flex flex-col md:flex-row gap-6 h-[calc(100vh-2rem)]">
+            {/* 게임 테이블 영역 */}
+            <div className="flex-grow rounded-xl overflow-hidden shadow-2xl bg-gray-900 bg-opacity-50 border border-gray-800">
+              <GameTable 
+                gameState={gameState} 
+                currentPlayerId={playerId}
+              />
+            </div>
             
-            {/* 카드 조합 정보 */}
-            {cardCombination && (
-              <div className="p-4 bg-gray-700 bg-opacity-80 rounded-lg border border-yellow-500">
-                <h3 className="text-lg font-bold mb-2 text-yellow-400">내 카드 조합</h3>
-                <div className="flex justify-between items-center">
-                  <CardPair cards={cardCombination.cards} />
-                  <div className="text-right">
-                    <p className="font-bold text-yellow-400 text-xl">{cardCombination.rank}</p>
-                    <p className="text-sm text-gray-300">점수: {cardCombination.value}</p>
-                  </div>
-                </div>
+            {/* 우측 정보 패널 */}
+            <div className="w-full md:w-80 lg:w-96 flex flex-col space-y-4">
+              {/* 게임 컨트롤 */}
+              <div className="h-auto">
+                <GameControls 
+                  gameState={gameState} 
+                  currentPlayerId={playerId}
+                  onAction={handleAfterAction} 
+                />
               </div>
-            )}
-            
-            {/* 게임 컨트롤 */}
-            <GameControls
-              gameState={gameState}
-              currentPlayerId={userId}
-              onAction={fetchGameState}
+              
+              {/* 채팅 */}
+              <div className="flex-grow overflow-hidden">
+                <Chat 
+                  gameId={gameId} 
+                  playerId={playerId} 
+                  username={username}
+                  messages={messages}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  
+  // 게임 참가 폼
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-950">
+      <div className="w-full max-w-md p-8 bg-gray-900 rounded-lg shadow-lg border border-yellow-800">
+        <h1 className="text-2xl font-bold text-center text-yellow-400 mb-6">섯다 게임 참가</h1>
+        
+        {error && (
+          <div className="bg-red-600 text-white p-3 rounded-md mb-4">
+            {error}
+          </div>
+        )}
+        
+        <form onSubmit={(e) => {
+          e.preventDefault();
+          handleJoinGame(username);
+        }}>
+          <div className="mb-4">
+            <label htmlFor="username" className="block text-sm font-bold text-gray-300 mb-2">
+              닉네임
+            </label>
+            <input
+              type="text"
+              id="username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              className="w-full px-3 py-2 bg-gray-800 text-white rounded-md focus:outline-none focus:ring-2 focus:ring-yellow-500"
+              placeholder="게임에서 사용할 닉네임을 입력하세요"
+              disabled={isJoining}
+              required
             />
           </div>
           
-          {/* 오른쪽: 채팅 */}
-          <div className="h-[600px]">
-            <Chat
-              gameId={gameId}
-              userId={userId}
-              username={username}
-            />
-          </div>
-        </div>
+          <button
+            type="submit"
+            disabled={isJoining || !username.trim()}
+            className={`w-full py-3 bg-gradient-to-r from-yellow-600 to-yellow-700 hover:from-yellow-500 hover:to-yellow-600 text-white font-bold rounded-md shadow-lg transition-all ${
+              isJoining || !username.trim() ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
+          >
+            {isJoining ? '참가 중...' : '게임 참가하기'}
+          </button>
+        </form>
       </div>
     </div>
   );
-}
-
-// 게임 상태 한글 변환 함수
-function translateStatus(status: string): string {
-  switch (status) {
-    case 'waiting': return '대기 중';
-    case 'playing': return '게임 중';
-    case 'finished': return '종료됨';
-    default: return status;
-  }
 } 

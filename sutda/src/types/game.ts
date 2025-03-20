@@ -1,28 +1,77 @@
+/**
+ * 게임의 상태를 나타내는 타입
+ */
+export type GameStatus = 'waiting' | 'playing' | 'finished';
+
+/**
+ * 카드의 상태를 나타내는 타입
+ */
+export type CardStatus = 'hidden' | 'showing' | 'open';
+
+/**
+ * 플레이어 정보 인터페이스
+ */
 export interface Player {
   id: string;
   username: string;
-  cards: number[];
-  isDie: boolean;
   balance: number;
+  cards?: number[];
+  isDie?: boolean;
+  position?: number;
 }
 
+/**
+ * 메시지 인터페이스
+ */
+export interface Message {
+  id: string;
+  content: string;
+  username: string;
+  created_at: string;
+  player_id: string;
+  game_id: string;
+}
+
+/**
+ * 게임 액션 인터페이스
+ */
+export interface GameAction {
+  id: string;
+  action_type: 'bet' | 'call' | 'die' | 'show' | 'start';
+  player_id: string;
+  amount?: number;
+  created_at: string;
+}
+
+/**
+ * 게임 상태 인터페이스
+ */
 export interface GameState {
   id: string;
-  status: 'waiting' | 'playing' | 'finished';
+  status: GameStatus;
   players: Player[];
-  currentTurn: string | null;
-  bettingValue: number;
+  currentTurn: string;
   winner: string | null;
+  bettingValue: number;
+  lastAction?: GameAction;
+  messages?: Message[];
 }
 
-export type GameAction = 
-  | { type: 'JOIN_GAME'; payload: { playerId: string; username: string } }
-  | { type: 'START_GAME'; payload: { initialTurn: string } }
-  | { type: 'PLACE_BET'; payload: { playerId: string; amount: number } }
-  | { type: 'CALL'; payload: { playerId: string } }
-  | { type: 'DIE'; payload: { playerId: string } }
-  | { type: 'CHECK'; payload: { playerId: string } }
-  | { type: 'END_GAME'; payload: { winnerId: string } };
+/**
+ * 게임 생성 응답 인터페이스
+ */
+export interface CreateGameResponse {
+  gameId: string;
+  playerId: string;
+}
+
+/**
+ * 게임 참여 응답 인터페이스
+ */
+export interface JoinGameResponse {
+  playerId: string;
+  gameState: GameState;
+}
 
 export type CardRank = 
   | '광땡' // 1-3광땡, 1-8광땡

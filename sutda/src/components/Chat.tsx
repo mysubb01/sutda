@@ -1,172 +1,123 @@
 'use client';
 
-import { useState, FormEvent, useEffect, useRef } from 'react';
-import { supabase } from '@/lib/supabase';
+import { useState, useEffect, useRef } from 'react';
+import Image from 'next/image';
+import { Message } from '@/types/game';
 import { sendMessage } from '@/lib/gameApi';
-import { RealtimeChannel } from '@supabase/supabase-js';
-
-interface Message {
-  id: string;
-  username: string;
-  content: string;
-  created_at: string;
-  game_id?: string;
-  user_id?: string;
-}
 
 interface ChatProps {
   gameId: string;
-  userId: string;
+  playerId: string;
   username: string;
+  messages: Message[];
 }
 
-export function Chat({ gameId, userId, username }: ChatProps) {
-  const [message, setMessage] = useState('');
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const channelRef = useRef<RealtimeChannel | null>(null);
+export function Chat({ gameId, playerId, username, messages }: ChatProps) {
+  const [messageText, setMessageText] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const chatBoxRef = useRef<HTMLDivElement>(null);
+  
+  // 새 메시지가 오면 스크롤을 아래로 이동
+  useEffect(() => {
+    if (chatBoxRef.current) {
+      chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
+    }
+  }, [messages]);
 
-  // 채팅 메시지 불러오기
-  const fetchMessages = async () => {
+  // 메시지 전송 처리
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!messageText.trim()) return;
+    
     setIsLoading(true);
+    setError(null);
+    
     try {
-      const { data, error } = await supabase
-        .from('messages')
-        .select('*')
-        .eq('game_id', gameId)
-        .order('created_at', { ascending: true });
-
-      if (!error && data) {
-        setMessages(data);
-      } else {
-        console.error('메시지 불러오기 오류:', error);
-      }
+      await sendMessage(gameId, playerId, messageText);
+      setMessageText('');
     } catch (err) {
-      console.error('메시지 불러오기 예외:', err);
+      console.error('메시지 전송 오류:', err);
+      setError('메시지를 전송하는 중 오류가 발생했습니다.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  useEffect(() => {
-    // 메시지 불러오기
-    fetchMessages();
-    
-    // 메시지 실시간 구독
-    const messageChannel = supabase
-      .channel(`messages-${gameId}-live`)
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'messages',
-        filter: `game_id=eq.${gameId}`
-      }, (payload) => {
-        console.log('New message received in chat component:', payload);
-        // 새 메시지가 나의 메시지가 아닌 경우에만 추가 (중복 방지)
-        if (payload.new.user_id !== userId) {
-          setMessages(prev => [...prev, payload.new as Message]);
-        }
-      });
-      
-    const status = messageChannel.subscribe((status) => {
-      console.log(`Chat component subscription status: ${status}`);
-    });
-    
-    channelRef.current = messageChannel;
-
-    return () => {
-      // 구독 정리
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-      }
-    };
-  }, [gameId, userId]);
-
-  // 메시지가 추가될 때마다 스크롤 맨 아래로
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    
-    if (!message.trim()) return;
-    
-    try {
-      const result = await sendMessage(gameId, userId, username, message);
-      console.log('Message sent:', result);
-      
-      // 내가 보낸 메시지를 즉시 추가 (UI 반응성을 위해)
-      const newMessage: Message = {
-        id: Date.now().toString(), // 임시 ID, 서버 응답으로 대체될 수 있음
-        game_id: gameId,
-        user_id: userId,
-        username: username,
-        content: message,
-        created_at: new Date().toISOString()
-      };
-      
-      setMessages(prev => [...prev, newMessage]);
-      setMessage('');
-    } catch (error) {
-      console.error('메시지 전송 오류:', error);
-    }
-  };
-
   return (
-    <div className="h-full flex flex-col bg-gray-800 bg-opacity-80 rounded-lg overflow-hidden border border-gray-600">
-      <div className="p-2 bg-gray-700 border-b border-gray-600">
-        <h3 className="text-white font-bold">게임 채팅</h3>
+    <div className="flex flex-col h-full bg-gray-900 bg-opacity-80 rounded-lg border border-yellow-600 shadow-lg overflow-hidden">
+      <div className="p-3 bg-gradient-to-r from-yellow-700 to-yellow-900 border-b border-yellow-600">
+        <h2 className="text-xl font-bold text-yellow-300">채팅</h2>
       </div>
       
-      <div className="flex-1 p-3 overflow-y-auto">
-        {isLoading ? (
-          <div className="flex items-center justify-center h-full">
-            <p className="text-gray-400">메시지를 불러오는 중...</p>
-          </div>
+      <div 
+        ref={chatBoxRef}
+        className="flex-grow p-3 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800"
+        style={{ maxHeight: 'calc(100% - 110px)' }}
+      >
+        {messages.length === 0 ? (
+          <p className="text-gray-400 text-center italic">메시지가 없습니다.</p>
         ) : (
           <div className="space-y-2">
-            {messages.length === 0 ? (
-              <p className="text-center text-gray-400 py-4">아직 메시지가 없습니다.</p>
-            ) : (
-              messages.map((msg) => (
-                <div 
-                  key={msg.id} 
-                  className={`p-2 rounded-lg max-w-[90%] ${
-                    msg.username === username 
-                      ? 'bg-blue-600 ml-auto' 
-                      : 'bg-gray-700'
-                  }`}
-                >
-                  <div className="text-xs text-gray-300 mb-1">
-                    {msg.username}
-                  </div>
-                  <div className="text-sm">
-                    {msg.content}
-                  </div>
+            {messages.map((message) => (
+              <div 
+                key={message.id} 
+                className={`${
+                  message.player_id === playerId 
+                    ? 'bg-blue-900 ml-6 rounded-tl-xl rounded-tr-xl rounded-bl-xl' 
+                    : 'bg-gray-800 mr-6 rounded-tl-xl rounded-tr-xl rounded-br-xl'
+                } p-2 shadow-md`}
+              >
+                <div className="flex items-center space-x-1">
+                  <span className={`font-bold text-xs ${
+                    message.player_id === playerId ? 'text-blue-300' : 'text-yellow-300'
+                  }`}>
+                    {message.username}
+                  </span>
+                  <span className="text-gray-400 text-xs">
+                    {new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
                 </div>
-              ))
-            )}
-            <div ref={messagesEndRef} />
+                <p className="text-white mt-1 break-words">{message.content}</p>
+              </div>
+            ))}
           </div>
         )}
       </div>
       
-      <form onSubmit={handleSubmit} className="p-2 border-t border-gray-600 flex">
-        <input 
-          type="text" 
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          placeholder="메시지 입력..."
-          className="flex-1 px-3 py-2 bg-gray-700 rounded-l-md border border-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        />
-        <button 
-          type="submit"
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-r-md"
-        >
-          전송
-        </button>
+      {error && (
+        <div className="bg-red-600 text-white p-2 text-sm">
+          {error}
+        </div>
+      )}
+      
+      <form onSubmit={handleSendMessage} className="p-3 bg-gray-800 border-t border-gray-700">
+        <div className="flex space-x-2">
+          <input
+            type="text"
+            value={messageText}
+            onChange={(e) => setMessageText(e.target.value)}
+            className="flex-grow px-3 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-yellow-500"
+            placeholder="메시지 입력..."
+            disabled={isLoading}
+          />
+          <button
+            type="submit"
+            disabled={isLoading || !messageText.trim()}
+            className={`px-4 bg-gradient-to-r from-yellow-600 to-yellow-700 hover:from-yellow-500 hover:to-yellow-600 text-white font-bold rounded-lg transition-all ${
+              isLoading || !messageText.trim() ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
+          >
+            <Image 
+              src="/images/ui/send.png" 
+              alt="전송" 
+              width={24} 
+              height={24} 
+              className="w-6 h-6"
+            />
+          </button>
+        </div>
       </form>
     </div>
   );

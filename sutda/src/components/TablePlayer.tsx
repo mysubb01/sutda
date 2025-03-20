@@ -1,65 +1,177 @@
 'use client';
 
-import { CardPair } from './Card';
 import Image from 'next/image';
+import { CardStatus } from '@/types/game';
+import { cn } from '@/lib/utils';
 
-interface PlayerData {
-  id: string;
+interface TablePlayerProps {
+  position: number; // 0부터 시작하는 플레이어 위치
   username: string;
-  cards?: number[];
   balance: number;
-  isDie?: boolean;
-}
-
-interface PlayerProps {
-  player: PlayerData;
-  isCurrentPlayer: boolean;
   isCurrentTurn: boolean;
-  showCards: boolean;
+  isDead: boolean;
+  isMe: boolean;
+  faceImage?: string; // 플레이어 캐릭터 이미지 경로
+  cards?: {
+    status: CardStatus; // 'hidden' | 'showing' | 'open'
+    value?: string;
+  }[];
 }
 
-export function Player({ player, isCurrentPlayer, isCurrentTurn, showCards }: PlayerProps) {
-  const { username, cards, isDie, balance } = player;
+export function TablePlayer({
+  position,
+  username,
+  balance,
+  isCurrentTurn,
+  isDead,
+  isMe,
+  faceImage = '/images/ui/face1.png', // 기본 이미지 설정
+  cards = []
+}: TablePlayerProps) {
+  // 플레이어 위치에 따른 스타일 계산
+  const positionStyles = getPositionStyles(position);
   
-  const playerClasses = `
-    w-36 p-2 rounded-lg relative
-    ${isCurrentPlayer ? 'bg-blue-800 bg-opacity-90' : 'bg-gray-800 bg-opacity-80'} 
-    ${isCurrentTurn ? 'ring-2 ring-yellow-400' : ''}
-    ${isDie ? 'opacity-70' : ''}
-    border border-gray-600
-    transition-all duration-300
-  `;
+  // 카드 상태에 따른 이미지 URL 결정
+  const getCardImageUrl = (status: CardStatus, value?: string) => {
+    if (status === 'open' && value) {
+      return `/images/cards/${value}.png`;
+    } else if (status === 'showing') {
+      return '/images/cards/back.png';
+    } else {
+      return '/images/cards/hidden.png';
+    }
+  };
 
   return (
-    <div className={playerClasses}>
-      <div className="flex flex-col items-center">
-        <div className="text-sm font-bold mb-1 text-yellow-400">
-          {username}
-          {isCurrentPlayer && <span className="ml-1 text-green-400">(나)</span>}
+    <div
+      className={cn(
+        'absolute flex flex-col items-center',
+        positionStyles.container,
+        isCurrentTurn && 'animate-pulse'
+      )}
+    >
+      {/* 플레이어 상태 표시 */}
+      <div className="relative mb-1">
+        {/* 플레이어 프로필 */}
+        <div className={cn(
+          'flex items-center justify-center relative',
+          isDead && 'opacity-50'
+        )}>
+          <div className={cn(
+            'relative w-16 h-16 rounded-full overflow-hidden border-2 shadow-lg',
+            isMe ? 'border-blue-500' : 'border-yellow-500',
+            isCurrentTurn ? 'ring-2 ring-green-400' : ''
+          )}>
+            <Image
+              src={faceImage}
+              alt={username}
+              width={64}
+              height={64}
+              className="object-cover"
+            />
+            
+            {isDead && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50">
+                <Image
+                  src="/images/ui/dieM.png"
+                  alt="Die"
+                  width={40}
+                  height={40}
+                  className="object-contain"
+                />
+              </div>
+            )}
+          </div>
         </div>
         
-        {cards && cards.length > 0 ? (
-          <div className="scale-75 origin-top">
-            <CardPair cards={cards} isHidden={!isCurrentPlayer && !showCards} />
+        {/* 플레이어 정보 */}
+        <div className="absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-20 text-center">
+          <div className="bg-gray-900 bg-opacity-80 p-1 rounded-md shadow-md border border-yellow-600">
+            <p className="text-xs font-bold text-white truncate">
+              {username}
+            </p>
+            <p className="text-xs text-yellow-400">
+              {balance.toLocaleString()}P
+            </p>
           </div>
-        ) : (
-          <div className="h-12 flex items-center justify-center">
-            <span className="text-xs text-gray-400">대기 중...</span>
-          </div>
-        )}
-        
-        <div className="mt-1 text-xs text-yellow-400">{balance} 포인트</div>
-        
-        {isDie && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-40 rounded-lg">
-            <span className="text-red-500 font-bold text-sm">다이</span>
-          </div>
-        )}
+        </div>
       </div>
       
-      {isCurrentTurn && (
-        <div className="absolute -top-1 -right-1 w-4 h-4 bg-yellow-500 rounded-full animate-pulse"></div>
-      )}
+      {/* 카드 영역 */}
+      <div className={cn(
+        'flex space-x-1',
+        positionStyles.cards
+      )}>
+        {cards.map((card, idx) => (
+          <div
+            key={idx}
+            className={cn(
+              'relative w-10 h-14 transition-all',
+              card.status === 'hidden' && 'opacity-50 scale-95'
+            )}
+          >
+            <Image
+              src={getCardImageUrl(card.status, card.value)}
+              alt={card.status}
+              width={40}
+              height={56}
+              className="rounded shadow-md"
+            />
+          </div>
+        ))}
+      </div>
     </div>
   );
+}
+
+// 플레이어 위치에 따른 스타일 계산 함수
+function getPositionStyles(position: number): { container: string; cards: string } {
+  // 8개 위치에 맞게 스타일 설정 (원형 테이블 기준)
+  switch (position % 8) {
+    case 0: // 하단 중앙
+      return {
+        container: 'bottom-4 left-1/2 -translate-x-1/2',
+        cards: 'mt-2'
+      };
+    case 1: // 하단 우측
+      return {
+        container: 'bottom-12 right-16 lg:right-24',
+        cards: 'mt-2'
+      };
+    case 2: // 우측
+      return {
+        container: 'right-4 top-1/2 -translate-y-1/2',
+        cards: 'ml-2 flex-col space-y-1 space-x-0'
+      };
+    case 3: // 상단 우측
+      return {
+        container: 'top-12 right-16 lg:right-24',
+        cards: 'mb-2 flex-row-reverse'
+      };
+    case 4: // 상단 중앙
+      return {
+        container: 'top-4 left-1/2 -translate-x-1/2',
+        cards: 'mb-2 flex-row-reverse'
+      };
+    case 5: // 상단 좌측
+      return {
+        container: 'top-12 left-16 lg:left-24',
+        cards: 'mb-2 flex-row-reverse'
+      };
+    case 6: // 좌측
+      return {
+        container: 'left-4 top-1/2 -translate-y-1/2',
+        cards: 'mr-2 flex-col space-y-1 space-x-0'
+      };
+    case 7: // 하단 좌측
+      return {
+        container: 'bottom-12 left-16 lg:left-24',
+        cards: 'mt-2'
+      };
+    default:
+      return {
+        container: 'bottom-4 left-1/2 -translate-x-1/2',
+        cards: 'mt-2'
+      };
+  }
 } 

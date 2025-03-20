@@ -25,12 +25,16 @@
     "@types/node": "^22.13.10",
     "@types/react": "^18.2.55",
     "@types/react-dom": "^18.2.19",
+    "@types/uuid": "^10.0.0",
+    "clsx": "^2.1.1",
     "express": "^4.21.2",
     "next": "^14.0.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "supabase": "^2.19.7",
-    "typescript": "^5.8.2"
+    "tailwind-merge": "^3.0.2",
+    "typescript": "^5.8.2",
+    "uuid": "^11.1.0"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.14",
