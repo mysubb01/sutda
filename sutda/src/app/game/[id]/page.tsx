@@ -13,7 +13,13 @@ import { CardPair } from '@/components/Card';
 import { evaluateCards } from '@/utils/gameLogic';
 import { RealtimeChannel } from '@supabase/supabase-js';
 
-export default function GamePage({ params }: { params: { id: string } }) {
+type GamePageProps = {
+  params: {
+    id: string;
+  }
+}
+
+export default function GamePage({ params }: GamePageProps) {
   const searchParams = useSearchParams();
   const userId = searchParams.get('userId') || '';
   const username = searchParams.get('username') || '';
