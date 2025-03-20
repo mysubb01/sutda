@@ -134,9 +134,9 @@ export function GameTable({ gameState, currentPlayerId, gameId, fetchGameState }
 
   return (
     <div className="h-full min-h-screen w-full bg-gradient-to-b from-green-800 to-green-950 p-4">
-      <div className="mx-auto flex h-full max-w-7xl flex-col lg:flex-row">
+      <div className="mx-auto flex h-full max-w-7xl flex-col">
         {/* 메인 게임 영역 */}
-        <div className="relative mb-4 flex-1 overflow-hidden rounded-2xl bg-green-900 p-6 shadow-xl lg:mb-0 lg:mr-4">
+        <div className="relative flex-1 overflow-hidden rounded-2xl bg-green-900 p-6 shadow-xl mb-4">
           <div className="relative h-full w-full overflow-hidden">
             {/* 테이블 배경 */}
             <div 
@@ -236,7 +236,26 @@ export function GameTable({ gameState, currentPlayerId, gameId, fetchGameState }
           )}
         </div>
         
-        {/* ... existing code ... */}
+        {/* 게임 컨트롤 및 채팅 영역 - 테이블 외부로 이동 */}
+        <div className="flex space-x-4">
+          <div className="w-3/4">
+            {gameState?.status !== 'finished' && (
+              <GameControls
+                gameState={gameState}
+                currentPlayerId={currentPlayerId}
+                onAction={fetchGameState}
+              />
+            )}
+          </div>
+          <div className="w-1/4 h-40">
+            <Chat
+              gameId={gameId}
+              playerId={currentPlayerId}
+              username={currentPlayer.username}
+              messages={gameState.messages || []}
+            />
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -249,37 +268,32 @@ function getEmptySlotStyles(position: number): string {
     case 0: // 하단 중앙
       return 'bottom-6 left-1/2 -translate-x-1/2';
     case 1: // 하단 우측
-      return 'bottom-16 right-20 lg:right-28';
-    case 2: // 우측
+      return 'bottom-1/4 right-1/4 -translate-x-1/2 -translate-y-1/2';
+    case 2: // 우측 중앙
       return 'right-6 top-1/2 -translate-y-1/2';
     case 3: // 상단 우측
-      return 'top-16 right-20 lg:right-28';
+      return 'top-1/4 right-1/4 -translate-x-1/2 -translate-y-1/2';
     case 4: // 상단 중앙
       return 'top-6 left-1/2 -translate-x-1/2';
     case 5: // 상단 좌측
-      return 'top-16 left-20 lg:left-28';
-    case 6: // 좌측
+      return 'top-1/4 left-1/4 -translate-x-1/2 -translate-y-1/2';
+    case 6: // 좌측 중앙
       return 'left-6 top-1/2 -translate-y-1/2';
     case 7: // 하단 좌측
-      return 'bottom-16 left-20 lg:left-28';
+      return 'bottom-1/4 left-1/4 -translate-x-1/2 -translate-y-1/2';
     default:
-      return 'bottom-6 left-1/2 -translate-x-1/2';
+      return '';
   }
 }
 
-// 카드 이미지 파일 이름 변환 함수
+// 카드 파일명 변환 함수
 function getCardFileName(cardId: number): string {
-  console.log('카드 ID:', cardId);
+  // 카드 타입 (0-9)과 카드 색상 (0-1)으로 분리
+  const cardType = cardId % 10;
+  const cardColor = Math.floor(cardId / 10);
   
-  try {
-    // 기존 로직 제거, 단순하게 숫자로 매핑
-    // 카드 ID를 단순 1~20 범위로 변환 (현재 사용 가능한 이미지 파일)
-    const adjustedCardId = (cardId % 10) + 1; // 1~10 범위로 변환
-    
-    console.log('변환된 카드 ID:', adjustedCardId);
-    return String(adjustedCardId);
-  } catch (error) {
-    console.error('카드 파일명 변환 오류:', error);
-    return '1'; // 오류 시 기본 카드
-  }
+  // 카드 파일명 형식: '색상타입.png'
+  // 색상: 0=검정, 1=빨강
+  // 타입: 0-9까지의 숫자
+  return `/images/cards/${cardColor}${cardType}.png`;
 } 

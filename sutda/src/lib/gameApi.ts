@@ -316,7 +316,7 @@ export async function placeBet(
 
   // 마지막 배팅 액션 찾기
   const lastBetAction = actionsData?.find(action => 
-    ['bet', 'raise', 'call', 'half'].includes(action.action_type) && 
+    ['bet', 'raise', 'call', 'half', 'quarter'].includes(action.action_type) && 
     action.player_id !== playerId
   );
 
@@ -343,6 +343,11 @@ export async function placeBet(
       betAmount = Math.floor(gameState.bettingValue / 2);
       // 최소 기본 배팅액 보장
       betAmount = betAmount < baseBet ? baseBet : betAmount;
+      break;
+      
+    case 'quarter':
+      // 따당(현재 배팅액의 2배)
+      betAmount = (lastBetAction?.amount || baseBet) * 2;
       break;
       
     case 'bet':
