@@ -47,7 +47,7 @@ const cardImagePaths: Record<number, string> = {
   20: '/images/cards/20.jpg', // 10월 일반
 };
 
-// 카드 뒷면 이미지 경로
+// 카드 뒷면 이미지 경로 - 절대 경로로 확정
 export const cardBackImagePath = '/images/cards/CardBack.png';
 
 // 카드 텍스트 설명
@@ -119,6 +119,12 @@ export function preloadCardImages(): void {
   
   console.log('카드 이미지 사전 로드 중...');
   
+  // 카드 뒷면 이미지 먼저 로드 (중요)
+  const backImg = new Image();
+  backImg.onload = () => console.log(`뒷면 이미지 로드 성공: ${cardBackImagePath}`);
+  backImg.onerror = () => console.warn(`뒷면 이미지 로드 실패: ${cardBackImagePath}`);
+  backImg.src = cardBackImagePath;
+  
   // 모든 카드 이미지 로드
   Object.values(cardImagePaths).forEach(path => {
     const img = new Image();
@@ -126,12 +132,6 @@ export function preloadCardImages(): void {
     img.onerror = () => console.warn(`이미지 로드 실패: ${path}`);
     img.src = path;
   });
-  
-  // 카드 뒷면 이미지 로드
-  const backImg = new Image();
-  backImg.onload = () => console.log(`뒷면 이미지 로드 성공`);
-  backImg.onerror = () => console.warn(`뒷면 이미지 로드 실패`);
-  backImg.src = cardBackImagePath;
   
   console.log('카드 이미지 사전 로드 요청 완료');
 } 

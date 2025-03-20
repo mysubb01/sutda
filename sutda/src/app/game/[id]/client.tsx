@@ -157,26 +157,39 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
         <div className="container mx-auto p-4 relative z-10">
           <div className="flex flex-col md:flex-row gap-6 h-[calc(100vh-2rem)]">
             {/* 게임 테이블 영역 */}
-            <div className="flex-grow rounded-xl overflow-hidden shadow-2xl bg-gray-900 bg-opacity-50 border border-gray-800">
+            <div className="flex-grow rounded-xl overflow-hidden shadow-2xl bg-gray-900 bg-opacity-50 border border-gray-800 relative">
               <GameTable 
                 gameState={gameState} 
                 currentPlayerId={playerId}
               />
+              
+              {/* 게임 컨트롤 (오른쪽 아래에 위치) */}
+              {gameState.status === 'playing' && (
+                <div className="absolute bottom-4 right-4 md:bottom-6 md:right-6 w-full max-w-xs md:max-w-sm z-20">
+                  <GameControls 
+                    gameState={gameState} 
+                    currentPlayerId={playerId}
+                    onAction={handleAfterAction} 
+                  />
+                </div>
+              )}
             </div>
             
             {/* 우측 정보 패널 */}
             <div className="w-full md:w-80 lg:w-96 flex flex-col space-y-4">
-              {/* 게임 컨트롤 */}
-              <div className="h-auto">
-                <GameControls 
-                  gameState={gameState} 
-                  currentPlayerId={playerId}
-                  onAction={handleAfterAction} 
-                />
-              </div>
+              {/* 게임 컨트롤 (대기 및 종료 상태용) */}
+              {gameState.status !== 'playing' && (
+                <div className="h-auto">
+                  <GameControls 
+                    gameState={gameState} 
+                    currentPlayerId={playerId}
+                    onAction={handleAfterAction} 
+                  />
+                </div>
+              )}
               
               {/* 채팅 */}
-              <div className="flex-grow overflow-hidden">
+              <div className="flex-grow h-auto overflow-hidden">
                 <Chat 
                   gameId={gameId} 
                   playerId={playerId} 

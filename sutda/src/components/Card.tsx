@@ -17,13 +17,14 @@ export function Card({ card, isHidden = false }: CardProps) {
   // 카드가 숨겨진 경우 뒷면 표시
   if (isHidden) {
     return (
-      <div className="w-28 h-44 rounded-md overflow-hidden shadow-lg relative group">
+      <div className="w-32 h-48 rounded-md overflow-hidden shadow-lg relative group transition-transform hover:scale-105">
         <Image
           src={cardBackImagePath}
           alt="카드 뒷면"
-          width={112}
-          height={176}
+          width={128}
+          height={192}
           className="w-full h-full object-cover"
+          priority={true}
           onError={(e) => {
             // 이미지 로드 오류시 대체 UI 표시
             e.currentTarget.style.display = 'none';
@@ -39,13 +40,14 @@ export function Card({ card, isHidden = false }: CardProps) {
   
   // 카드 앞면 표시
   return (
-    <div className="w-28 h-44 rounded-md overflow-hidden shadow-lg relative group">
+    <div className="w-32 h-48 rounded-md overflow-hidden shadow-lg relative group transition-transform hover:scale-105">
       <Image
         src={getCardImagePath(card)}
         alt={`${month}월 ${kwang ? '광' : '일반'}`}
-        width={112}
-        height={176}
+        width={128}
+        height={192}
         className="w-full h-full object-cover"
+        priority={true}
         onError={(e) => {
           // 이미지 로드 오류시 대체 UI 표시
           e.currentTarget.style.display = 'none';
