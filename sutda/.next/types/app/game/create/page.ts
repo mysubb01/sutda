@@ -1,4 +1,4 @@
-// File: C:\Users\sucha\Desktop\coding\code\sutda\sutda\src\app\game\create\page.tsx
+// File: C:\Users\sucha\Desktop\coding\code\sutda\src\app\game\create\page.tsx
 import * as entry from '../../../../../src/app/game/create/page.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 
