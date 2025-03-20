@@ -33,12 +33,20 @@ export function TablePlayer({
   
   // 카드 상태에 따른 이미지 URL 결정
   const getCardImageUrl = (status: CardStatus, value?: string) => {
-    if (status === 'open' && value) {
-      return `/images/cards/${value}.png`;
-    } else if (status === 'showing') {
-      return '/images/cards/back.png';
-    } else {
-      return '/images/cards/hidden.png';
+    console.log('카드 상태:', status, '값:', value);
+    try {
+      if (status === 'open' && value) {
+        // 실제 존재하는 카드 이미지로 변경 (.jpg)
+        return `/images/cards/${value}.jpg`;
+      } else if (status === 'showing') {
+        return '/images/cards/back.jpg';
+      } else {
+        // 숨겨진 카드
+        return '/images/cards/back.jpg'; // 뒷면 카드 이미지
+      }
+    } catch (error) {
+      console.error('카드 이미지 URL 생성 오류:', error);
+      return '/images/cards/back.jpg'; // 오류 시 기본 카드 이미지
     }
   };
 

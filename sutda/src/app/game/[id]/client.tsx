@@ -47,6 +47,7 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
   const fetchGameState = async () => {
     try {
       const data = await getGameState(gameId);
+      console.log('게임 상태 업데이트:', data);
       setGameState(data);
       return data;
     } catch (err) {
@@ -75,7 +76,7 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
       const gameStateInterval = setInterval(() => {
         console.log('게임 상태 폴링...');
         fetchGameState();
-      }, 2000); // 2초마다
+      }, 1000); // 1초마다로 변경하여 반응성 향상
       
       const messagesInterval = setInterval(() => {
         console.log('메시지 폴링...');
