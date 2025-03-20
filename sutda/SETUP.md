@@ -8,7 +8,7 @@
 
 1. [Supabase](https://supabase.com/)에 방문하여 계정을 생성합니다.
 2. 대시보드에서 "New Project"를 클릭하여 새 프로젝트를 생성합니다.
-3. 프로젝트 이름(예: `korean-style-poker`) 및 데이터베이스 비밀번호를 설정합니다.
+3. 프로젝트 이름(예: `sutda`) 및 데이터베이스 비밀번호를 설정합니다.
 4. 지역은 가능한 가까운 곳으로 선택합니다 (예: `Asia Northeast 3 (Seoul)`).
 5. "Create new project"를 클릭하여 프로젝트를 생성합니다.
 
