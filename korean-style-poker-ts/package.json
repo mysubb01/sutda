@@ -1,0 +1,42 @@
+{
+  "name": "korean-style-poker-ts",
+  "version": "1.0.0",
+  "description": "한국식 포커 게임 섯다 - TypeScript & Supabase 버전",
+  "main": "index.js",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "setup": "node scripts/setup.js"
+  },
+  "keywords": [
+    "섯다",
+    "포커",
+    "한국식포커",
+    "카드게임",
+    "supabase"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.1",
+    "@types/express": "^5.0.1",
+    "@types/node": "^22.13.10",
+    "@types/react": "^19.0.12",
+    "@types/react-dom": "^19.0.4",
+    "express": "^4.21.2",
+    "next": "^15.2.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "supabase": "^2.19.7",
+    "typescript": "^5.8.2"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.14",
+    "nodemon": "^3.1.9",
+    "postcss": "^8.4.23",
+    "tailwindcss": "^3.3.0",
+    "ts-node": "^10.9.2"
+  }
+}

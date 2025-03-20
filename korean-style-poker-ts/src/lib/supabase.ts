@@ -1,0 +1,8 @@
+import { createClient } from '@supabase/supabase-js';
+import { Database } from '@/types/supabase';
+
+// 환경 변수 설정이 필요합니다
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+
+export const supabase = createClient<Database>(supabaseUrl, supabaseKey); 
