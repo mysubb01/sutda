@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { GameState } from '@/types/game';
-import { getGameState } from '@/lib/gameApi';
+import { getGameState, joinGame } from '@/lib/gameApi';
 import { supabase } from '@/lib/supabase';
 import { subscribeToGameUpdates, subscribeToMessages } from '@/lib/realtimeUtils';
-import { Player } from '@/components/Player';
+import { GameTable } from '@/components/GameTable';
 import { Chat } from '@/components/Chat';
 import { GameControls } from '@/components/GameControls';
 import { CardPair } from '@/components/Card';
@@ -19,6 +19,7 @@ type GamePageClientProps = {
 
 export default function GamePageClient({ gameId }: GamePageClientProps) {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const userId = searchParams.get('userId') || '';
   const username = searchParams.get('username') || '';
   
@@ -48,9 +49,28 @@ export default function GamePageClient({ gameId }: GamePageClientProps) {
     }
   }, [gameId]);
 
+  // 게임 참가 처리
+  const handleJoinGame = async () => {
+    if (!userId || !username) {
+      alert('사용자 정보가 없습니다. 홈 페이지로 이동합니다.');
+      router.push('/');
+      return;
+    }
+    
+    try {
+      setIsLoading(true);
+      await joinGame(gameId, userId, username);
+      await fetchGameState();
+    } catch (err) {
+      console.error('게임 참가 오류:', err);
+      setError('게임에 참가할 수 없습니다.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // 새 메시지 수신 처리
   const handleNewMessage = useCallback((payload: any) => {
-    // Chat 컴포넌트에서 자체적으로 구독하므로 여기서는 필요 없음
     console.log('새 메시지 수신됨', payload);
   }, []);
 
@@ -87,7 +107,6 @@ export default function GamePageClient({ gameId }: GamePageClientProps) {
     setMessageChannel(msgSubscription);
 
     return () => {
-      // 구독 정리
       if (gameSubscription) {
         console.log('Removing game subscription');
         supabase.removeChannel(gameSubscription);
@@ -123,7 +142,7 @@ export default function GamePageClient({ gameId }: GamePageClientProps) {
         <div className="text-center">
           <p className="text-xl text-red-500 mb-4">{error || '게임을 찾을 수 없습니다.'}</p>
           <button
-            onClick={() => window.location.href = '/'}
+            onClick={() => router.push('/')}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md"
           >
             홈으로 돌아가기
@@ -144,22 +163,22 @@ export default function GamePageClient({ gameId }: GamePageClientProps) {
     >
       <div className="absolute inset-0 bg-black bg-opacity-60"></div>
       <div className="max-w-6xl mx-auto relative z-10">
-        <h1 className="text-3xl font-bold mb-6 text-center text-yellow-400">한국식 포커 - 섯다</h1>
+        <h1 className="text-3xl font-bold mb-2 text-center text-yellow-400">한국식 포커 - 섯다</h1>
+        
+        {/* 게임 ID와 정보 */}
+        <div className="mb-6 text-center">
+          <p className="text-sm text-gray-300">게임 ID: {gameId} | 상태: {translateStatus(gameState.status)}</p>
+        </div>
         
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          {/* 왼쪽: 플레이어 목록 */}
+          {/* 왼쪽: 게임 테이블과 컨트롤 */}
           <div className="md:col-span-3 space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {gameState.players.map(player => (
-                <Player
-                  key={player.id}
-                  player={player}
-                  isCurrentPlayer={player.id === userId}
-                  isCurrentTurn={player.id === gameState.currentTurn}
-                  showCards={showAllCards}
-                />
-              ))}
-            </div>
+            {/* 게임 테이블 */}
+            <GameTable 
+              gameState={gameState}
+              currentUserId={userId}
+              onJoin={handleJoinGame}
+            />
             
             {/* 카드 조합 정보 */}
             {cardCombination && (
@@ -195,4 +214,14 @@ export default function GamePageClient({ gameId }: GamePageClientProps) {
       </div>
     </div>
   );
+}
+
+// 게임 상태 한글 변환 함수
+function translateStatus(status: string): string {
+  switch (status) {
+    case 'waiting': return '대기 중';
+    case 'playing': return '게임 중';
+    case 'finished': return '종료됨';
+    default: return status;
+  }
 } 
