@@ -64,14 +64,14 @@ export function Chat({ gameId, playerId, username, messages }: ChatProps) {
               <div 
                 key={message.id} 
                 className={`${
-                  message.player_id === playerId 
+                  message.user_id === localStorage.getItem(`game_${gameId}_user_id`)
                     ? 'bg-blue-900 ml-6 rounded-tl-xl rounded-tr-xl rounded-bl-xl' 
                     : 'bg-gray-800 mr-6 rounded-tl-xl rounded-tr-xl rounded-br-xl'
                 } p-2 shadow-md`}
               >
                 <div className="flex items-center space-x-1">
                   <span className={`font-bold text-xs ${
-                    message.player_id === playerId ? 'text-blue-300' : 'text-yellow-300'
+                    message.user_id === localStorage.getItem(`game_${gameId}_user_id`) ? 'text-blue-300' : 'text-yellow-300'
                   }`}>
                     {message.username}
                   </span>
