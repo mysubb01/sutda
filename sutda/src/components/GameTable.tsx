@@ -9,7 +9,7 @@ import { GameControls } from './GameControls';
 import { Chat } from './Chat';
 import { GameResult } from './GameResult';
 import { toast } from 'react-hot-toast';
-import { startNewGame } from '@/lib/gameApi';
+import { startGame } from '@/lib/gameApi';
 
 interface GameTableProps {
   gameState: GameState;
@@ -119,7 +119,7 @@ export function GameTable({ gameState, currentPlayerId, gameId, fetchGameState }
       }
       
       // 새 게임 시작
-      await startNewGame(gameId);
+      await startGame(gameId);
       
       // 성공 메시지 표시
       toast.success('새 게임이 시작되었습니다.');

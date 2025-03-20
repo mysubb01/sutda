@@ -20,5 +20,11 @@
   "..\\node_modules\\@supabase\\storage-js\\dist\\module\\lib\\helpers.js -> @supabase/node-fetch": {
     "id": 485,
     "files": []
+  },
+  "components\\Card.tsx -> @/utils/cardImages": {
+    "id": 2556,
+    "files": [
+      "static/chunks/556.fc8cda62e993f9c6.js"
+    ]
   }
 }
