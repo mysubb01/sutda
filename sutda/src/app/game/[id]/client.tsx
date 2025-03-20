@@ -9,6 +9,9 @@ import { GameControls } from '@/components/GameControls';
 import { Chat } from '@/components/Chat';
 import { supabase } from '@/lib/supabase';
 import { RealtimeChannel } from '@supabase/supabase-js';
+import { GameTableSkeleton } from '@/components/GameTableSkeleton';
+import { toast } from 'react-hot-toast';
+import { BettingHistory } from '@/components/BettingHistory';
 
 interface ClientGamePageProps {
   gameId: string;
@@ -23,6 +26,7 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
   const [error, setError] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isSubscribed, setIsSubscribed] = useState(false);
+  const [reconnected, setReconnected] = useState(false);
   
   // 메시지 불러오기
   const fetchMessages = async () => {
@@ -136,6 +140,96 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
     fetchGameState();
   };
   
+  // 게임 상태와 현재 플레이어 정보 추출
+  const isWaiting = gameState?.status === 'waiting';
+  const isPlaying = gameState?.status === 'playing'; 
+  const isFinished = gameState?.status === 'finished';
+  const isRegame = gameState?.status === 'regame';
+  
+  // 현재 플레이어 정보
+  const currentPlayer = gameState?.players.find(p => p.id === playerId);
+  const isCurrentTurn = gameState?.currentTurn === playerId;
+  
+  // 게임 재접속 처리
+  useEffect(() => {
+    if (sessionStorage.getItem('gameReconnected') !== 'true') {
+      toast.success('게임에 접속되었습니다');
+      sessionStorage.setItem('gameReconnected', 'true');
+      
+      // 재접속 메시지 표시
+      if (reconnected) {
+        toast('기존 게임에 재접속했습니다', { duration: 3000 });
+      }
+    }
+    
+    return () => {
+      // 페이지 이탈 시 재접속 플래그 초기화
+      sessionStorage.removeItem('gameReconnected');
+    };
+  }, [reconnected]);
+
+  // 현재 턴 변경 시 효과음 및 알림
+  useEffect(() => {
+    if (!isPlaying) return;
+    
+    if (isCurrentTurn) {
+      toast.success('당신의 턴입니다!', { duration: 3000 });
+      // 효과음 재생
+      const audio = new Audio('/sounds/turn.mp3');
+      audio.volume = 0.5;
+      audio.play().catch(e => console.log('효과음 재생 실패:', e));
+    }
+  }, [gameState?.currentTurn, isPlaying, isCurrentTurn]);
+  
+  // 승자 결정 시 효과음 및 알림
+  useEffect(() => {
+    if (isFinished && gameState?.winner) {
+      const isWinner = gameState.winner === playerId;
+      const winnerName = gameState.players.find(p => p.id === gameState.winner)?.username;
+      
+      if (isWinner) {
+        toast.success('🎉 승리했습니다! 🎉', { duration: 5000 });
+        // 승리 효과음
+        const audio = new Audio('/sounds/win.mp3');
+        audio.volume = 0.5;
+        audio.play().catch(e => console.log('효과음 재생 실패:', e));
+      } else {
+        toast.error(`${winnerName}님이 승리했습니다`, { duration: 5000 });
+        // 패배 효과음
+        const audio = new Audio('/sounds/lose.mp3');
+        audio.volume = 0.3;
+        audio.play().catch(e => console.log('효과음 재생 실패:', e));
+      }
+    }
+  }, [isFinished, gameState?.winner, playerId, gameState?.players]);
+  
+  // 재경기 처리 시 알림
+  useEffect(() => {
+    if (isRegame) {
+      toast('⚠️ 특수 패로 인한 재경기를 진행합니다', { 
+        duration: 5000,
+        style: {
+          border: '1px solid #F97316',
+          padding: '16px',
+          color: '#F97316',
+        },
+        iconTheme: {
+          primary: '#F97316',
+          secondary: '#FFFAEE',
+        },
+      });
+      // 재경기 효과음
+      const audio = new Audio('/sounds/regame.mp3');
+      audio.volume = 0.4;
+      audio.play().catch(e => console.log('효과음 재생 실패:', e));
+    }
+  }, [isRegame]);
+  
+  // 이미 참가한 상태지만 게임 상태를 로딩 중인 경우
+  if (playerId && !gameState) {
+    return <GameTableSkeleton />;
+  }
+  
   // 이미 참가한 상태이고 게임 상태가 로드된 경우
   if (playerId && gameState) {
     return (
@@ -161,6 +255,8 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
               <GameTable 
                 gameState={gameState} 
                 currentPlayerId={playerId}
+                gameId={gameId}
+                fetchGameState={fetchGameState}
               />
               
               {/* 게임 컨트롤 (오른쪽 아래에 위치) */}

@@ -2,8 +2,8 @@
 
 import { useState } from 'react';
 import Image from 'next/image';
-import { GameState } from '@/types/game';
-import { startGame, placeBet, callBet, dieBet } from '@/lib/gameApi';
+import { GameState, BetActionType } from '@/types/game';
+import { startGame, placeBet } from '@/lib/gameApi';
 
 interface GameControlsProps {
   gameState: GameState;
@@ -15,7 +15,7 @@ interface GameControlsProps {
 const buttonImages = {
   call: '/images/ui/callbtn.png',
   die: '/images/ui/diebtn.png',
-  bet: '/images/ui/doublebtn.png',
+  bet: '/images/ui/doublebtn.png', 
   half: '/images/ui/halfbtn.png',
   quarter: '/images/ui/quarterbtn.png',
   ping: '/images/ui/pingbtn.png'
@@ -30,6 +30,7 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
   const isGameWaiting = gameState.status === 'waiting';
   const isGamePlaying = gameState.status === 'playing';
   const isGameFinished = gameState.status === 'finished';
+  const isGameRegame = gameState.status === 'regame';
   
   const currentPlayer = gameState.players.find(p => p.id === currentPlayerId);
   
@@ -71,7 +72,7 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
         throw new Error('유효하지 않은 베팅 금액입니다.');
       }
       
-      await placeBet(gameState.id, currentPlayerId, betValue);
+      await placeBet(gameState.id, currentPlayerId, 'bet', betValue);
       onAction();
     } catch (err) {
       console.error('베팅 오류:', err);
@@ -87,7 +88,7 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
     setError(null);
     
     try {
-      await callBet(gameState.id, currentPlayerId);
+      await placeBet(gameState.id, currentPlayerId, 'call');
       onAction();
     } catch (err) {
       console.error('콜 오류:', err);
@@ -103,7 +104,7 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
     setError(null);
     
     try {
-      await dieBet(gameState.id, currentPlayerId);
+      await placeBet(gameState.id, currentPlayerId, 'die');
       onAction();
     } catch (err) {
       console.error('다이 오류:', err);
@@ -113,11 +114,42 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
     }
   };
 
-  // 빠른 배팅 금액 계산 (현재 베팅 금액의 절반, 콜)
-  const getHalfBetAmount = () => {
-    if (!currentPlayer) return 0;
-    const halfBet = Math.floor(gameState.bettingValue / 2);
-    return halfBet > 0 && currentPlayer.balance >= halfBet ? halfBet : 0;
+  // 하프 처리 추가
+  const handleHalf = async () => {
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      await placeBet(gameState.id, currentPlayerId, 'half');
+      onAction();
+    } catch (err) {
+      console.error('하프 오류:', err);
+      setError('하프 중 오류가 발생했습니다.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 체크 처리 추가
+  const handleCheck = async () => {
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      await placeBet(gameState.id, currentPlayerId, 'check');
+      onAction();
+    } catch (err) {
+      console.error('체크 오류:', err);
+      setError('체크 중 오류가 발생했습니다.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 이전 베팅이 있는지 확인
+  const hasPreviousBet = (): boolean => {
+    // 게임 베팅값이 0보다 크면 이전 베팅이 있는 것
+    return gameState.bettingValue > 0;
   };
 
   // 베팅 버튼 컴포넌트
@@ -172,6 +204,37 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
     );
   }
 
+  if (isGameRegame) {
+    const remainingTime = gameState.regame_remaining_time || 5; // 기본값 5초
+
+    return (
+      <div className="p-6 bg-gray-900 bg-opacity-90 rounded-lg border border-yellow-500 shadow-lg">
+        <h2 className="text-2xl font-bold text-center mb-4 text-yellow-400">재경기 진행 중</h2>
+        <div className="flex justify-center">
+          <div className="spinner"></div>
+        </div>
+        <p className="text-gray-300 text-center mt-4">특수 패(구사/멍텅구리구사) 발생으로 재경기를 준비하고 있습니다.</p>
+        <p className="text-yellow-400 text-center mt-2 font-bold">{remainingTime}초 후 재시작...</p>
+        
+        <style jsx>{`
+          .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border-left-color: #fbbd23;
+            animation: spin 1s linear infinite;
+          }
+          
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        `}</style>
+      </div>
+    );
+  }
+
   if (isGameWaiting) {
     return (
       <div className="p-6 bg-gray-900 bg-opacity-90 rounded-lg border border-yellow-500 shadow-lg">
@@ -216,9 +279,9 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
           <h2 className="text-lg font-bold text-yellow-400">게임 진행 중</h2>
           <div className="text-right">
             <p className="text-yellow-400 font-bold">{gameState.bettingValue} 포인트</p>
-            {currentPlayer && (
+          {currentPlayer && (
               <p className="text-xs text-gray-300">내 잔액: {currentPlayer.balance} P</p>
-            )}
+          )}
           </div>
         </div>
         
@@ -235,16 +298,16 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
             {/* 커스텀 베팅 입력 */}
             <div className="mb-3">
               <div className="flex space-x-2">
-                <input
-                  type="number"
-                  value={betAmount}
-                  onChange={(e) => setBetAmount(parseInt(e.target.value) || 0)}
-                  min={100}
-                  max={currentPlayer?.balance || 0}
-                  step={100}
+              <input
+                type="number"
+                value={betAmount}
+                onChange={(e) => setBetAmount(parseInt(e.target.value) || 0)}
+                min={100}
+                max={currentPlayer?.balance || 0}
+                step={100}
                   className="flex-grow px-2 py-1 bg-gray-800 rounded-md border border-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
-                  disabled={isLoading}
-                />
+                disabled={isLoading}
+              />
                 <button
                   className="px-3 py-1 bg-yellow-600 hover:bg-yellow-500 text-white font-bold rounded-md shadow transition-all text-sm"
                   onClick={() => handleBet()}
@@ -256,19 +319,22 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
             </div>
             
             {/* 배팅 이미지 버튼 - 화면 아래쪽 배치 */}
-            <div className="grid grid-cols-3 gap-2">
-              <BettingButton
-                imageSrc={buttonImages.ping}
-                label="삥"
-                onClick={() => handleBet(100)}
-                disabled={isLoading || (currentPlayer?.balance || 0) < 100}
-              />
+            <div className="grid grid-cols-3 gap-2 mt-2">
+              {/* 체크 버튼 - 이전 베팅이 없을 때만 표시 */}
+              {!hasPreviousBet() && (
+                <BettingButton
+                  imageSrc="/images/ui/checkbtn.png"
+                  label="체크"
+                  onClick={handleCheck}
+                  disabled={isLoading}
+                />
+              )}
               
               <BettingButton
                 imageSrc={buttonImages.call}
                 label="콜"
                 onClick={handleCall}
-                disabled={isLoading}
+                disabled={isLoading || !hasPreviousBet()}
               />
               
               <BettingButton
@@ -288,8 +354,8 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
               <BettingButton
                 imageSrc={buttonImages.half}
                 label="하프"
-                onClick={() => handleBet(getHalfBetAmount())}
-                disabled={isLoading || getHalfBetAmount() <= 0}
+                onClick={() => handleHalf()}
+                disabled={isLoading}
               />
               
               <BettingButton

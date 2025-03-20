@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: '한국식 포커 - 섯다',
-  description: '전통적인 한국식 포커 게임인 섯다를 온라인에서 즐겨보세요!',
+  title: '섯다 게임',
+  description: '온라인 섯다 게임 서비스',
 };
 
 export default function RootLayout({
@@ -17,5 +17,5 @@ export default function RootLayout({
         <main>{children}</main>
       </body>
     </html>
-  );
+  )
 } 

@@ -65,17 +65,12 @@ const cardTextDescriptions: Record<number, string> = {
 };
 
 /**
- * 카드 번호에 해당하는 이미지 경로를 반환합니다.
- * @param cardNumber 카드 번호 (1~20)
- * @returns 이미지 경로
+ * 카드 이미지 경로 생성
  */
 export function getCardImagePath(cardNumber: number): string {
-  if (cardNumber < 1 || cardNumber > 20) {
-    console.warn(`유효하지 않은 카드 번호: ${cardNumber}`);
-    return cardBackImagePath; // 유효하지 않은 카드 번호인 경우 뒷면 반환
-  }
-  
-  return cardImagePaths[cardNumber];
+  const month = Math.ceil(cardNumber / 2);
+  const isKwang = cardNumber % 2 === 1;
+  return `/images/cards/${month}_${isKwang ? 'kwang' : 'yeol'}.png`;
 }
 
 /**
@@ -111,27 +106,31 @@ export function checkImageExists(path: string): Promise<boolean> {
 }
 
 /**
- * 카드 이미지를 사전에 로드합니다.
- * 이미지를 미리 로드하여 게임 중 지연을 방지합니다.
+ * 모든 카드 이미지를 프리로드
  */
 export function preloadCardImages(): void {
+  // 브라우저 환경에서만 실행
   if (typeof window === 'undefined') return;
   
-  console.log('카드 이미지 사전 로드 중...');
+  console.log('카드 이미지 프리로딩 시작...');
   
-  // 카드 뒷면 이미지 먼저 로드 (중요)
-  const backImg = new Image();
-  backImg.onload = () => console.log(`뒷면 이미지 로드 성공: ${cardBackImagePath}`);
-  backImg.onerror = () => console.warn(`뒷면 이미지 로드 실패: ${cardBackImagePath}`);
-  backImg.src = cardBackImagePath;
+  // 뒷면과 폴백 이미지 프리로드
+  const preloadBackImage = new Image();
+  preloadBackImage.src = cardBackImagePath;
   
-  // 모든 카드 이미지 로드
-  Object.values(cardImagePaths).forEach(path => {
-    const img = new Image();
-    img.onload = () => console.log(`이미지 로드 성공: ${path}`);
-    img.onerror = () => console.warn(`이미지 로드 실패: ${path}`);
-    img.src = path;
-  });
+  const preloadFallbackImage = new Image();
+  preloadFallbackImage.src = '/images/cards/unknown.png';
   
-  console.log('카드 이미지 사전 로드 요청 완료');
+  // 모든 카드 이미지 프리로드 (1월~10월, 광/열끗)
+  for (let month = 1; month <= 10; month++) {
+    // 광 카드
+    const kwangImage = new Image();
+    kwangImage.src = `/images/cards/${month}_kwang.png`;
+    
+    // 열끗 카드
+    const yeolImage = new Image();
+    yeolImage.src = `/images/cards/${month}_yeol.png`;
+  }
+  
+  console.log('카드 이미지 프리로딩 완료');
 } 

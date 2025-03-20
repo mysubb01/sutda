@@ -3,64 +3,57 @@
 import Image from 'next/image';
 import { getCardMonth, isKwang } from '@/utils/gameLogic';
 import { getCardImagePath, cardBackImagePath } from '@/utils/cardImages';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 interface CardProps {
   card: number;
   isHidden?: boolean;
+  width?: number;
+  height?: number;
 }
 
-export function Card({ card, isHidden = false }: CardProps) {
-  const month = getCardMonth(card);
-  const kwang = isKwang(card);
+export function Card({ card, isHidden = false, width = 120, height = 192 }: CardProps) {
+  const [imageError, setImageError] = useState(false);
   
-  // 카드가 숨겨진 경우 뒷면 표시
+  // 카드 뒷면 이미지
   if (isHidden) {
     return (
-      <div className="w-32 h-48 rounded-md overflow-hidden shadow-lg relative group transition-transform hover:scale-105">
+      <div className="relative w-full h-full" style={{ aspectRatio: '5/8' }}>
         <Image
-          src={cardBackImagePath}
+          src="/images/cards/back.png"
           alt="카드 뒷면"
-          width={128}
-          height={192}
-          className="w-full h-full object-cover"
-          priority={true}
-          onError={(e) => {
-            // 이미지 로드 오류시 대체 UI 표시
-            e.currentTarget.style.display = 'none';
-            e.currentTarget.parentElement?.classList.add('image-error');
-          }}
+          width={width}
+          height={height}
+          className="object-contain w-full h-full rounded-md shadow-md"
+          priority
         />
-        <div className="absolute inset-0 flex items-center justify-center bg-red-800 text-yellow-500 font-bold text-2xl hidden group-[.image-error]:flex">
-          ?
-        </div>
       </div>
     );
   }
   
-  // 카드 앞면 표시
+  // 카드 정보 계산
+  const month = getCardMonth(card);
+  const isLight = isKwang(card);
+  
+  // 카드 이미지 경로
+  let cardImagePath = `/images/cards/${month}_${isLight ? 'kwang' : 'yeol'}.png`;
+  
+  // 폴백 이미지 경로 (이미지 로드 실패 시)
+  const fallbackImagePath = '/images/cards/unknown.png';
+  
   return (
-    <div className="w-32 h-48 rounded-md overflow-hidden shadow-lg relative group transition-transform hover:scale-105">
+    <div className="relative w-full h-full" style={{ aspectRatio: '5/8' }}>
       <Image
-        src={getCardImagePath(card)}
-        alt={`${month}월 ${kwang ? '광' : '일반'}`}
-        width={128}
-        height={192}
-        className="w-full h-full object-cover"
-        priority={true}
-        onError={(e) => {
-          // 이미지 로드 오류시 대체 UI 표시
-          e.currentTarget.style.display = 'none';
-          e.currentTarget.parentElement?.classList.add('image-error');
-        }}
+        src={imageError ? fallbackImagePath : cardImagePath}
+        alt={`${month}월 ${isLight ? '광' : '열끗'}`}
+        width={width}
+        height={height}
+        className="object-contain w-full h-full rounded-md shadow-md"
+        priority
+        onError={() => setImageError(true)}
       />
-      <div className="absolute inset-0 flex flex-col items-center justify-center bg-white bg-opacity-80 hidden group-[.image-error]:flex">
-        <div className="text-4xl font-bold text-red-800">
-          {month}
-        </div>
-        <div className="mt-2 text-sm text-gray-800">
-          {kwang ? '광' : '월'}
-        </div>
+      <div className="absolute top-1 left-1 text-xs font-bold bg-white/70 dark:bg-black/70 px-1 rounded">
+        {month}월{isLight ? ' 광' : ''}
       </div>
     </div>
   );
@@ -82,9 +75,11 @@ export function CardPair({ cards, isHidden = false }: CardPairProps) {
   }, []);
   
   return (
-    <div className="flex space-x-3">
+    <div className="flex space-x-2">
       {cards.map((card, idx) => (
-        <Card key={idx} card={card} isHidden={isHidden} />
+        <div key={idx} className="w-16 h-24 sm:w-20 sm:h-32">
+          <Card card={card} isHidden={isHidden} />
+        </div>
       ))}
     </div>
   );
