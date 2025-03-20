@@ -47,7 +47,7 @@ export interface GameAction {
 }
 
 // 배팅 액션 타입 정의
-export type BetActionType = 'check' | 'call' | 'half' | 'bet' | 'raise' | 'die';
+export type BetActionType = 'check' | 'call' | 'half' | 'bet' | 'raise' | 'die' | 'quarter';
 
 /**
  * 게임 상태 인터페이스
