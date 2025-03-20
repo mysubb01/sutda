@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Image from 'next/image';
 import { GameState } from '@/types/game';
 import { startGame, placeBet, callBet, dieBet } from '@/lib/gameApi';
 
@@ -9,6 +10,16 @@ interface GameControlsProps {
   currentPlayerId: string;
   onAction: () => void;
 }
+
+// 버튼 이미지 경로
+const buttonImages = {
+  call: '/images/ui/callbtn.png',
+  die: '/images/ui/diebtn.png',
+  bet: '/images/ui/doublebtn.png', 
+  half: '/images/ui/halfbtn.png',
+  quarter: '/images/ui/quarterbtn.png',
+  ping: '/images/ui/pingbtn.png'
+};
 
 export function GameControls({ gameState, currentPlayerId, onAction }: GameControlsProps) {
   const [betAmount, setBetAmount] = useState<number>(500);
@@ -97,11 +108,11 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
 
   if (isGameFinished) {
     return (
-      <div className="p-6 bg-gray-700 rounded-lg">
-        <h2 className="text-2xl font-bold text-center mb-4">게임 종료</h2>
+      <div className="p-6 bg-gray-700 bg-opacity-80 rounded-lg border border-yellow-500">
+        <h2 className="text-2xl font-bold text-center mb-4 text-yellow-400">게임 종료</h2>
         {winnerName && (
           <div className="text-center">
-            <p className="text-yellow-400 font-bold mb-2">{winnerName}님이 승리했습니다!</p>
+            <p className="text-yellow-400 font-bold mb-2 text-xl">{winnerName}님이 승리했습니다!</p>
             <p className="text-gray-300">획득 포인트: {gameState.bettingValue}</p>
           </div>
         )}
@@ -117,8 +128,8 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
 
   if (isGameWaiting) {
     return (
-      <div className="p-6 bg-gray-700 rounded-lg">
-        <h2 className="text-2xl font-bold text-center mb-4">게임 대기 중</h2>
+      <div className="p-6 bg-gray-700 bg-opacity-80 rounded-lg border border-yellow-500">
+        <h2 className="text-2xl font-bold text-center mb-4 text-yellow-400">게임 대기 중</h2>
         <p className="text-gray-300 text-center mb-4">현재 {gameState.players.length}명의 플레이어가 대기 중입니다.</p>
         
         {error && (
@@ -153,8 +164,8 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
 
   if (isGamePlaying) {
     return (
-      <div className="p-6 bg-gray-700 rounded-lg">
-        <h2 className="text-2xl font-bold text-center mb-4">게임 진행 중</h2>
+      <div className="p-6 bg-gray-700 bg-opacity-80 rounded-lg border border-yellow-500">
+        <h2 className="text-2xl font-bold text-center mb-4 text-yellow-400">게임 진행 중</h2>
         
         <div className="mb-4">
           <p className="text-gray-300">현재 베팅 금액: <span className="text-yellow-400 font-bold">{gameState.bettingValue} 포인트</span></p>
@@ -174,52 +185,71 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
           <div>
             <p className="text-green-400 font-bold mb-3">당신의 차례입니다!</p>
             
-            <div className="space-y-3">
-              <div>
-                <label className="block text-gray-300 mb-1">베팅 금액</label>
-                <input
-                  type="number"
-                  value={betAmount}
-                  onChange={(e) => setBetAmount(parseInt(e.target.value) || 0)}
-                  min={100}
-                  max={currentPlayer?.balance || 0}
-                  step={100}
-                  className="w-full px-3 py-2 bg-gray-800 rounded-md border border-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  disabled={isLoading}
+            <div>
+              <label className="block text-gray-300 mb-1">베팅 금액</label>
+              <input
+                type="number"
+                value={betAmount}
+                onChange={(e) => setBetAmount(parseInt(e.target.value) || 0)}
+                min={100}
+                max={currentPlayer?.balance || 0}
+                step={100}
+                className="w-full px-3 py-2 bg-gray-800 rounded-md border border-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                disabled={isLoading}
+              />
+            </div>
+            
+            <div className="grid grid-cols-3 gap-2 mt-3">
+              <button
+                className={`relative h-12 overflow-hidden ${
+                  isLoading ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
+                onClick={handleBet}
+                disabled={isLoading || !currentPlayer || betAmount <= 0 || betAmount > currentPlayer.balance}
+              >
+                <Image
+                  src={buttonImages.bet}
+                  alt="베팅"
+                  width={80}
+                  height={48}
+                  className="w-full h-full object-contain"
                 />
-              </div>
+                <span className="absolute inset-0 flex items-center justify-center text-white font-bold">베팅</span>
+              </button>
               
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  className={`py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-md ${
-                    isLoading ? 'opacity-50 cursor-not-allowed' : ''
-                  }`}
-                  onClick={handleBet}
-                  disabled={isLoading || !currentPlayer || betAmount <= 0 || betAmount > currentPlayer.balance}
-                >
-                  베팅
-                </button>
-                
-                <button
-                  className={`py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-md ${
-                    isLoading ? 'opacity-50 cursor-not-allowed' : ''
-                  }`}
-                  onClick={handleCall}
-                  disabled={isLoading}
-                >
-                  콜
-                </button>
-                
-                <button
-                  className={`py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-md ${
-                    isLoading ? 'opacity-50 cursor-not-allowed' : ''
-                  }`}
-                  onClick={handleDie}
-                  disabled={isLoading}
-                >
-                  다이
-                </button>
-              </div>
+              <button
+                className={`relative h-12 overflow-hidden ${
+                  isLoading ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
+                onClick={handleCall}
+                disabled={isLoading}
+              >
+                <Image
+                  src={buttonImages.call}
+                  alt="콜"
+                  width={80}
+                  height={48}
+                  className="w-full h-full object-contain"
+                />
+                <span className="absolute inset-0 flex items-center justify-center text-white font-bold">콜</span>
+              </button>
+              
+              <button
+                className={`relative h-12 overflow-hidden ${
+                  isLoading ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
+                onClick={handleDie}
+                disabled={isLoading}
+              >
+                <Image
+                  src={buttonImages.die}
+                  alt="다이"
+                  width={80}
+                  height={48}
+                  className="w-full h-full object-contain"
+                />
+                <span className="absolute inset-0 flex items-center justify-center text-white font-bold">다이</span>
+              </button>
             </div>
           </div>
         ) : (
@@ -230,7 +260,7 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
   }
 
   return (
-    <div className="p-6 bg-gray-700 rounded-lg">
+    <div className="p-6 bg-gray-700 bg-opacity-80 rounded-lg border border-yellow-500">
       <p className="text-center text-gray-300">게임 상태를 불러오는 중...</p>
     </div>
   );

@@ -55,19 +55,32 @@ export default function GamePageClient({ gameId }: GamePageClientProps) {
   }, []);
 
   useEffect(() => {
+    console.log('Setting up game with ID:', gameId);
     fetchGameState();
     
     // 실시간 업데이트 구독
     const gameSubscription = subscribeToGameUpdates(
       gameId,
-      fetchGameState,  // 게임 상태 업데이트 시
-      fetchGameState,  // 플레이어 정보 업데이트 시
-      fetchGameState   // 게임 액션 업데이트 시
+      (payload) => {
+        console.log('Game state updated:', payload);
+        fetchGameState();
+      },
+      (payload) => {
+        console.log('Player updated:', payload);
+        fetchGameState();
+      },
+      (payload) => {
+        console.log('Action received:', payload);
+        fetchGameState();
+      }
     );
     
     const msgSubscription = subscribeToMessages(
       gameId,
-      handleNewMessage
+      (payload) => {
+        console.log('Message received in game component:', payload);
+        handleNewMessage(payload);
+      }
     );
     
     setGameChannel(gameSubscription);
@@ -76,9 +89,11 @@ export default function GamePageClient({ gameId }: GamePageClientProps) {
     return () => {
       // 구독 정리
       if (gameSubscription) {
+        console.log('Removing game subscription');
         supabase.removeChannel(gameSubscription);
       }
       if (msgSubscription) {
+        console.log('Removing message subscription');
         supabase.removeChannel(msgSubscription);
       }
     };
@@ -119,9 +134,17 @@ export default function GamePageClient({ gameId }: GamePageClientProps) {
   }
 
   return (
-    <div className="min-h-screen bg-gray-800 text-white p-4">
-      <div className="max-w-6xl mx-auto">
-        <h1 className="text-2xl font-bold mb-6 text-center">한국식 포커 - 섯다</h1>
+    <div 
+      className="min-h-screen text-white p-4 relative"
+      style={{
+        backgroundImage: 'url(/images/ui/bgM.png)',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center'
+      }}
+    >
+      <div className="absolute inset-0 bg-black bg-opacity-60"></div>
+      <div className="max-w-6xl mx-auto relative z-10">
+        <h1 className="text-3xl font-bold mb-6 text-center text-yellow-400">한국식 포커 - 섯다</h1>
         
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           {/* 왼쪽: 플레이어 목록 */}
@@ -140,12 +163,12 @@ export default function GamePageClient({ gameId }: GamePageClientProps) {
             
             {/* 카드 조합 정보 */}
             {cardCombination && (
-              <div className="p-4 bg-gray-700 rounded-lg">
-                <h3 className="text-lg font-bold mb-2">내 카드 조합</h3>
+              <div className="p-4 bg-gray-700 bg-opacity-80 rounded-lg border border-yellow-500">
+                <h3 className="text-lg font-bold mb-2 text-yellow-400">내 카드 조합</h3>
                 <div className="flex justify-between items-center">
                   <CardPair cards={cardCombination.cards} />
                   <div className="text-right">
-                    <p className="font-bold text-yellow-400">{cardCombination.rank}</p>
+                    <p className="font-bold text-yellow-400 text-xl">{cardCombination.rank}</p>
                     <p className="text-sm text-gray-300">점수: {cardCombination.value}</p>
                   </div>
                 </div>

@@ -3,7 +3,6 @@
 import { useState, FormEvent, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { sendMessage } from '@/lib/gameApi';
-import { subscribeToMessages, unsubscribe } from '@/lib/realtimeUtils';
 import { RealtimeChannel } from '@supabase/supabase-js';
 
 interface Message {
@@ -11,6 +10,8 @@ interface Message {
   username: string;
   content: string;
   created_at: string;
+  game_id?: string;
+  user_id?: string;
 }
 
 interface ChatProps {
@@ -27,44 +28,60 @@ export function Chat({ gameId, userId, username }: ChatProps) {
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   // 채팅 메시지 불러오기
-  useEffect(() => {
-    const fetchMessages = async () => {
-      setIsLoading(true);
-      try {
-        const { data, error } = await supabase
-          .from('messages')
-          .select('*')
-          .eq('game_id', gameId)
-          .order('created_at', { ascending: true });
+  const fetchMessages = async () => {
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('game_id', gameId)
+        .order('created_at', { ascending: true });
 
-        if (!error && data) {
-          setMessages(data);
-        } else {
-          console.error('메시지 불러오기 오류:', error);
-        }
-      } catch (err) {
-        console.error('메시지 불러오기 예외:', err);
-      } finally {
-        setIsLoading(false);
+      if (!error && data) {
+        setMessages(data);
+      } else {
+        console.error('메시지 불러오기 오류:', error);
       }
-    };
+    } catch (err) {
+      console.error('메시지 불러오기 예외:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
+  useEffect(() => {
+    // 메시지 불러오기
     fetchMessages();
-
-    // 실시간 메시지 구독
-    const handleNewMessage = (payload: any) => {
-      setMessages(prev => [...prev, payload.new as Message]);
-    };
     
-    channelRef.current = subscribeToMessages(gameId, handleNewMessage);
+    // 메시지 실시간 구독
+    const messageChannel = supabase
+      .channel(`messages-${gameId}-live`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `game_id=eq.${gameId}`
+      }, (payload) => {
+        console.log('New message received in chat component:', payload);
+        // 새 메시지가 나의 메시지가 아닌 경우에만 추가 (중복 방지)
+        if (payload.new.user_id !== userId) {
+          setMessages(prev => [...prev, payload.new as Message]);
+        }
+      });
+      
+    const status = messageChannel.subscribe((status) => {
+      console.log(`Chat component subscription status: ${status}`);
+    });
+    
+    channelRef.current = messageChannel;
 
     return () => {
       // 구독 정리
       if (channelRef.current) {
-        unsubscribe(channelRef.current);
+        supabase.removeChannel(channelRef.current);
       }
     };
-  }, [gameId]);
+  }, [gameId, userId]);
 
   // 메시지가 추가될 때마다 스크롤 맨 아래로
   useEffect(() => {
@@ -77,7 +94,20 @@ export function Chat({ gameId, userId, username }: ChatProps) {
     if (!message.trim()) return;
     
     try {
-      await sendMessage(gameId, userId, username, message);
+      const result = await sendMessage(gameId, userId, username, message);
+      console.log('Message sent:', result);
+      
+      // 내가 보낸 메시지를 즉시 추가 (UI 반응성을 위해)
+      const newMessage: Message = {
+        id: Date.now().toString(), // 임시 ID, 서버 응답으로 대체될 수 있음
+        game_id: gameId,
+        user_id: userId,
+        username: username,
+        content: message,
+        created_at: new Date().toISOString()
+      };
+      
+      setMessages(prev => [...prev, newMessage]);
       setMessage('');
     } catch (error) {
       console.error('메시지 전송 오류:', error);
@@ -85,7 +115,7 @@ export function Chat({ gameId, userId, username }: ChatProps) {
   };
 
   return (
-    <div className="h-full flex flex-col bg-gray-800 rounded-lg overflow-hidden">
+    <div className="h-full flex flex-col bg-gray-800 bg-opacity-80 rounded-lg overflow-hidden border border-gray-600">
       <div className="p-2 bg-gray-700 border-b border-gray-600">
         <h3 className="text-white font-bold">게임 채팅</h3>
       </div>
