@@ -19,6 +19,7 @@ export interface Player {
   cards?: number[];
   isDie?: boolean;
   position?: number;
+  seat_index?: number; // 테이블에서의 좌석 인덱스 (0-7)
 }
 
 /**
@@ -46,7 +47,7 @@ export interface GameAction {
 }
 
 // 배팅 액션 타입 정의
-export type BetActionType = 'check' | 'call' | 'half' | 'quarter' | 'bet' | 'raise' | 'die';
+export type BetActionType = 'check' | 'call' | 'half' | 'bet' | 'raise' | 'die';
 
 /**
  * 게임 상태 인터페이스
@@ -72,7 +73,7 @@ export interface GameState {
  */
 export interface CreateGameResponse {
   gameId: string;
-  playerId: string;
+  playerId: string | null;
 }
 
 /**

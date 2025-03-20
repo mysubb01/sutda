@@ -20,6 +20,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
 export default function GamePage({ params }: PageProps) {
   const { id } = params;
+
   return (
     <>
       <ClientGamePage gameId={id} />

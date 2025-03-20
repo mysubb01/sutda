@@ -36,31 +36,10 @@ export async function createGame(username: string): Promise<CreateGameResponse> 
     
     console.log('게임 생성 성공:', gameId);
     
-    // 플레이어 생성
-    const { data: playerData, error: playerError } = await supabase
-      .from('players')
-      .insert({
-        id: playerId,
-        game_id: gameId,
-        user_id: userId,
-        username,
-        balance: 10000,
-        is_die: false
-      })
-      .select();
+    // 관찰자 모드로 시작하므로 플레이어를 생성하지 않음
+    // 클라이언트는 빈 자리를 클릭해 참여해야 함
     
-    if (playerError) {
-      console.error('플레이어 생성 오류 세부 정보:', playerError);
-      throw new Error('플레이어를 생성할 수 없습니다: ' + playerError.message);
-    }
-    
-    console.log('플레이어 생성 성공:', playerId);
-    
-    // 로컬 스토리지에 사용자 정보 저장
-    localStorage.setItem(`game_${gameId}_user_id`, userId);
-    localStorage.setItem(`game_${gameId}_player_id`, playerId);
-    
-    return { gameId, playerId };
+    return { gameId, playerId: null };
   } catch (err) {
     console.error('게임 생성 중 예외 발생:', err);
     throw err;
@@ -70,7 +49,11 @@ export async function createGame(username: string): Promise<CreateGameResponse> 
 /**
  * 기존 게임에 참가
  */
-export async function joinGame(gameId: string, username: string): Promise<JoinGameResponse> {
+export async function joinGame(
+  gameId: string, 
+  username: string, 
+  seatIndex?: number
+): Promise<JoinGameResponse> {
   try {
     // 게임 상태 체크
     const { data: gameData, error: gameError } = await supabase
@@ -138,7 +121,8 @@ export async function joinGame(gameId: string, username: string): Promise<JoinGa
         user_id: userId,
         username,
         balance: 10000,
-        is_die: false
+        is_die: false,
+        seat_index: seatIndex
       })
       .select();
     
@@ -210,7 +194,8 @@ export async function getGameState(gameId: string): Promise<GameState> {
       username: player.username,
       balance: player.balance,
       cards: player.cards || [],
-      isDie: player.is_die
+      isDie: player.is_die,
+      seat_index: player.seat_index
     })),
     currentTurn: gameData.current_turn || '',
     winner: gameData.winner,
@@ -316,7 +301,7 @@ export async function placeBet(
 
   // 마지막 배팅 액션 찾기
   const lastBetAction = actionsData?.find(action => 
-    ['bet', 'raise', 'call', 'half', 'quarter'].includes(action.action_type) && 
+    ['bet', 'raise', 'call', 'half'].includes(action.action_type) && 
     action.player_id !== playerId
   );
 
@@ -343,11 +328,6 @@ export async function placeBet(
       betAmount = Math.floor(gameState.bettingValue / 2);
       // 최소 기본 배팅액 보장
       betAmount = betAmount < baseBet ? baseBet : betAmount;
-      break;
-      
-    case 'quarter':
-      // 따당(현재 배팅액의 2배)
-      betAmount = (lastBetAction?.amount || baseBet) * 2;
       break;
       
     case 'bet':
@@ -907,4 +887,41 @@ async function handleRegame(gameId: string): Promise<void> {
       console.error('재경기 시작 오류:', err);
     }
   }, REGAME_WAIT_TIME_MS);
+}
+
+// 플레이어 좌석 업데이트
+export async function updateSeat(gameId: string, playerId: string, seatIndex: number): Promise<void> {
+  try {
+    // 해당 좌석이 이미 사용 중인지 확인
+    const { data: existingPlayer, error: checkError } = await supabase
+      .from('players')
+      .select('id')
+      .eq('game_id', gameId)
+      .eq('seat_index', seatIndex);
+
+    if (checkError) {
+      console.error('좌석 확인 오류:', checkError);
+      throw new Error('좌석 정보를 확인할 수 없습니다.');
+    }
+
+    // 이미 다른 플레이어가 해당 좌석에 앉아있으면 오류
+    if (existingPlayer && existingPlayer.length > 0 && existingPlayer[0].id !== playerId) {
+      throw new Error('이미 다른 플레이어가 사용 중인 좌석입니다.');
+    }
+
+    // 플레이어 좌석 업데이트
+    const { error: updateError } = await supabase
+      .from('players')
+      .update({ seat_index: seatIndex })
+      .eq('game_id', gameId)
+      .eq('id', playerId);
+
+    if (updateError) {
+      console.error('좌석 업데이트 오류:', updateError);
+      throw new Error('좌석을 업데이트할 수 없습니다: ' + updateError.message);
+    }
+  } catch (err) {
+    console.error('좌석 업데이트 중 예외 발생:', err);
+    throw err;
+  }
 } 

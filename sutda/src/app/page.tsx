@@ -11,7 +11,7 @@ export default function Home() {
         
         <div className="space-y-4">
           <Link 
-            href="/game/new" 
+            href="/game/create" 
             className="block w-64 bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-lg mx-auto"
           >
             새 게임 시작하기
@@ -30,8 +30,6 @@ export default function Home() {
         <h2 className="text-xl font-semibold mb-4">게임 규칙</h2>
         <ul className="text-left max-w-md mx-auto space-y-2">
           <li>• 각 플레이어는 2장의 카드를 받습니다.</li>
-          <li>• 각 턴마다 베팅(Bet), 콜(Call), 또는 다이(Die) 중 하나를 선택합니다.</li>
-          <li>• 모든 플레이어가 콜하거나 한 명만 남으면 게임이 종료됩니다.</li>
           <li>• 카드 조합 순위: 광땡 &gt; 땡 &gt; 알리 &gt; 독사 &gt; 구삥 &gt; 장삥 &gt; 장사 &gt; 세륙 &gt; 끗 &gt; 망통</li>
         </ul>
       </div>

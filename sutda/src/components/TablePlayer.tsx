@@ -33,21 +33,28 @@ export function TablePlayer({
   
   // 카드 상태에 따른 이미지 URL 결정
   const getCardImageUrl = (status: CardStatus, value?: string) => {
-    console.log('카드 상태:', status, '값:', value);
     try {
-      if (status === 'open' && value) {
-        // 실제 존재하는 카드 이미지로 변경 (.jpg)
-        return `/images/cards/${value}.jpg`;
+      if (status === 'hidden') {
+        return '/images/cards/cardback.png'; // 숨김 상태용 이미지
       } else if (status === 'showing') {
-        return '/images/cards/back.jpg';
+        return '/images/cards/cardback.png'; // 뒷면 카드 이미지
+      } else if (status === 'open' && value) {
+        // 실제 존재하는 카드 이미지 반환
+        return `/images/cards/${value}.jpg`;
       } else {
-        // 숨겨진 카드
-        return '/images/cards/back.jpg'; // 뒷면 카드 이미지
+        // 기본 카드 이미지 (오류 방지)
+        return '/images/cards/cardback.png';
       }
     } catch (error) {
       console.error('카드 이미지 URL 생성 오류:', error);
-      return '/images/cards/back.jpg'; // 오류 시 기본 카드 이미지
+      return '/images/cards/cardback.png'; // 오류 시 기본 카드 이미지
     }
+  };
+
+  // 카드 이미지 로드 오류시 대체 이미지 처리
+  const handleImageError = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    e.currentTarget.src = '/images/cards/cardback.png';
+    console.log('카드 이미지 로드 실패, 대체 이미지 사용');
   };
 
   return (
@@ -60,70 +67,53 @@ export function TablePlayer({
     >
       {/* 플레이어 상태 표시 */}
       <div className="relative mb-1">
-        {/* 플레이어 프로필 */}
-        <div className={cn(
-          'flex items-center justify-center relative',
-          isDead && 'opacity-50'
-        )}>
-          <div className={cn(
-            'relative w-16 h-16 rounded-full overflow-hidden border-2 shadow-lg',
-            isMe ? 'border-blue-500' : 'border-yellow-500',
-            isCurrentTurn ? 'ring-2 ring-green-400' : ''
-          )}>
-            <Image
-              src={faceImage}
-              alt={username}
-              width={64}
-              height={64}
-              className="object-cover"
-            />
-            
-            {isDead && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50">
-                <Image
-                  src="/images/ui/dieM.png"
-                  alt="Die"
-                  width={40}
-                  height={40}
-                  className="object-contain"
-                />
-              </div>
-            )}
-          </div>
-        </div>
-        
         {/* 플레이어 정보 */}
-        <div className="absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-20 text-center">
-          <div className="bg-gray-900 bg-opacity-80 p-1 rounded-md shadow-md border border-yellow-600">
-            <p className="text-xs font-bold text-white truncate">
-              {username}
-            </p>
-            <p className="text-xs text-yellow-400">
-              {balance.toLocaleString()}P
-            </p>
-          </div>
+        <div className={cn(
+          'rounded-lg px-3 py-2 text-center',
+          isMe ? 'bg-blue-600 bg-opacity-90' : 'bg-gray-800 bg-opacity-90',
+          isDead && 'opacity-50',
+          isCurrentTurn ? 'ring-2 ring-green-400' : '',
+          'border-2',
+          isMe ? 'border-blue-500' : 'border-yellow-500',
+        )}>
+          <p className={cn(
+            'font-bold text-base',
+            isMe ? 'text-white' : 'text-yellow-300'
+          )}>
+            {username}
+          </p>
+          <p className="text-base font-medium text-yellow-400">
+            {balance.toLocaleString()}P
+          </p>
+          
+          {isDead && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 rounded-lg">
+              <p className="text-red-500 font-bold text-base">다이</p>
+            </div>
+          )}
         </div>
       </div>
       
       {/* 카드 영역 */}
       <div className={cn(
-        'flex space-x-1',
+        'flex space-x-2',
         positionStyles.cards
       )}>
         {cards.map((card, idx) => (
           <div
             key={idx}
             className={cn(
-              'relative w-10 h-14 transition-all',
+              'relative w-16 h-22 transition-all',
               card.status === 'hidden' && 'opacity-50 scale-95'
             )}
           >
             <Image
               src={getCardImageUrl(card.status, card.value)}
               alt={card.status}
-              width={40}
-              height={56}
-              className="rounded shadow-md"
+              width={64}
+              height={90}
+              className="rounded-md shadow-lg"
+              onError={handleImageError}
             />
           </div>
         ))}

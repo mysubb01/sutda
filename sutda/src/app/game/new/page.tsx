@@ -1,93 +1,21 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { createGame } from '@/lib/gameApi';
 
-export default function NewGame() {
+export default function NewGameRedirect() {
   const router = useRouter();
-  const [username, setUsername] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    
-    if (!username.trim()) {
-      setError('사용자 이름을 입력해주세요.');
-      return;
-    }
-    
-    setIsLoading(true);
-    setError(null);
-    
-    try {
-      // 새 게임 생성 (사용자 정보 포함)
-      const { gameId, playerId } = await createGame(username);
-      
-      // 로컬 스토리지에 플레이어 정보 저장
-      localStorage.setItem(`game_${gameId}_player_id`, playerId);
-      localStorage.setItem(`game_${gameId}_username`, username);
-      
-      // 게임 화면으로 이동
-      router.push(`/game/${gameId}`);
-    } catch (err) {
-      console.error('게임 생성 오류:', err);
-      setError('게임을 생성하는 중 오류가 발생했습니다. 다시 시도해주세요.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
+  
+  useEffect(() => {
+    // /game/create 페이지로 리디렉션
+    router.replace('/game/create');
+  }, [router]);
+  
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gray-800 text-white p-4">
-      <div className="w-full max-w-md bg-gray-700 rounded-lg shadow-lg p-8">
-        <h1 className="text-3xl font-bold mb-6 text-center">새 게임 생성</h1>
-        
-        {error && (
-          <div className="bg-red-500 text-white p-3 rounded-md mb-4">
-            {error}
-          </div>
-        )}
-        
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div>
-            <label htmlFor="username" className="block text-sm font-medium mb-2">
-              사용자 이름
-            </label>
-            <input
-              type="text"
-              id="username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              className="w-full px-3 py-2 bg-gray-800 rounded-md border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="게임에서 사용할 이름을 입력하세요"
-              disabled={isLoading}
-            />
-          </div>
-          
-          <button
-            type="submit"
-            className={`w-full py-3 font-medium rounded-md ${
-              isLoading
-                ? 'bg-gray-500 cursor-not-allowed'
-                : 'bg-red-600 hover:bg-red-700'
-            }`}
-            disabled={isLoading}
-          >
-            {isLoading ? '생성 중...' : '게임 생성 및 입장'}
-          </button>
-        </form>
-        
-        <div className="mt-6 text-center">
-          <Link
-            href="/"
-            className="text-blue-400 hover:text-blue-300 text-sm"
-          >
-            돌아가기
-          </Link>
-        </div>
+    <div className="min-h-screen flex items-center justify-center bg-gray-950 p-4">
+      <div className="text-center">
+        <div className="w-16 h-16 border-4 border-t-yellow-400 border-yellow-200 rounded-full animate-spin mx-auto mb-4"></div>
+        <p className="text-yellow-400 font-bold">새로운 게임 페이지로 이동 중...</p>
       </div>
     </div>
   );

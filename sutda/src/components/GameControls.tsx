@@ -114,7 +114,7 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
     }
   };
 
-  // 하프 처리
+  // 하프 처리 추가
   const handleHalf = async () => {
     setIsLoading(true);
     setError(null);
@@ -130,7 +130,7 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
     }
   };
 
-  // 체크 처리
+  // 체크 처리 추가
   const handleCheck = async () => {
     setIsLoading(true);
     setError(null);
@@ -146,17 +146,28 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
     }
   };
 
-  // 따당 처리
-  const handleDoubleQuarter = async () => {
+  // 따당 처리 추가
+  const handleDouble = async () => {
     setIsLoading(true);
     setError(null);
     
     try {
-      await placeBet(gameState.id, currentPlayerId, 'quarter');
+      if (!currentPlayer) {
+        throw new Error('플레이어 정보를 찾을 수 없습니다.');
+      }
+      
+      // 현재 배팅금액의 2배 계산
+      const doubleAmount = gameState.bettingValue * 2;
+      
+      if (doubleAmount <= 0 || doubleAmount > currentPlayer.balance) {
+        throw new Error('유효하지 않은 베팅 금액입니다.');
+      }
+      
+      await placeBet(gameState.id, currentPlayerId, 'bet', doubleAmount);
       onAction();
     } catch (err) {
-      console.error('따당 오류:', err);
-      setError('따당 중 오류가 발생했습니다.');
+      console.error('따당 베팅 오류:', err);
+      setError('따당 베팅 중 오류가 발생했습니다.');
     } finally {
       setIsLoading(false);
     }
@@ -181,7 +192,7 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
     disabled?: boolean; 
   }) => (
     <button
-      className={`relative h-10 w-20 overflow-hidden rounded-md shadow-md ${
+      className={`relative h-12 overflow-hidden rounded-md shadow-md ${
         disabled ? 'opacity-50 cursor-not-allowed' : 'transform hover:scale-105 transition-transform'
       }`}
       onClick={onClick}
@@ -190,8 +201,8 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
       <Image
         src={imageSrc}
         alt={label}
-        width={80}
-        height={40}
+        width={100}
+        height={48}
         className="w-full h-full object-cover"
       />
       <span className="absolute inset-0 flex items-center justify-center text-white font-bold text-sm drop-shadow-lg">
@@ -202,16 +213,16 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
 
   if (isGameFinished) {
     return (
-      <div className="p-4 bg-gray-900 bg-opacity-90 rounded-lg border border-yellow-500 shadow-lg">
-        <h2 className="text-xl font-bold text-center mb-3 text-yellow-400">게임 종료</h2>
+      <div className="p-6 bg-gray-900 bg-opacity-90 rounded-lg border border-yellow-500 shadow-lg">
+        <h2 className="text-2xl font-bold text-center mb-4 text-yellow-400">게임 종료</h2>
         {winnerName && (
           <div className="text-center">
-            <p className="text-yellow-400 font-bold mb-2 text-lg">{winnerName}님이 승리했습니다!</p>
+            <p className="text-yellow-400 font-bold mb-2 text-xl">{winnerName}님이 승리했습니다!</p>
             <p className="text-gray-300">획득 포인트: {gameState.bettingValue}</p>
           </div>
         )}
         <button
-          className="mt-3 w-full py-2 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white font-bold rounded-md shadow-lg transition-all"
+          className="mt-4 w-full py-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white font-bold rounded-md shadow-lg transition-all"
           onClick={() => window.location.href = '/'}
         >
           홈으로 돌아가기
@@ -224,12 +235,12 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
     const remainingTime = gameState.regame_remaining_time || 5; // 기본값 5초
 
     return (
-      <div className="p-4 bg-gray-900 bg-opacity-90 rounded-lg border border-yellow-500 shadow-lg">
-        <h2 className="text-xl font-bold text-center mb-3 text-yellow-400">재경기 진행 중</h2>
+      <div className="p-6 bg-gray-900 bg-opacity-90 rounded-lg border border-yellow-500 shadow-lg">
+        <h2 className="text-2xl font-bold text-center mb-4 text-yellow-400">재경기 진행 중</h2>
         <div className="flex justify-center">
           <div className="spinner"></div>
         </div>
-        <p className="text-gray-300 text-center mt-3">특수 패(구사/멍텅구리구사) 발생으로 재경기를 준비하고 있습니다.</p>
+        <p className="text-gray-300 text-center mt-4">특수 패(구사/멍텅구리구사) 발생으로 재경기를 준비하고 있습니다.</p>
         <p className="text-yellow-400 text-center mt-2 font-bold">{remainingTime}초 후 재시작...</p>
         
         <style jsx>{`
@@ -253,121 +264,160 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
 
   if (isGameWaiting) {
     return (
-      <div className="p-4 bg-gray-900 bg-opacity-90 rounded-lg border border-yellow-500 shadow-lg">
-        <h2 className="text-xl font-bold text-center mb-3 text-yellow-400">게임 대기 중</h2>
-        <p className="text-gray-300 text-center mb-3">현재 {gameState.players.length}명의 플레이어가 대기 중입니다.</p>
+      <div className="p-6 bg-gray-900 bg-opacity-90 rounded-lg border border-yellow-500 shadow-lg">
+        <h2 className="text-2xl font-bold text-center mb-4 text-yellow-400">게임 대기 중</h2>
+        <p className="text-gray-300 text-center mb-4">현재 {gameState.players.length}명의 플레이어가 대기 중입니다.</p>
         
         {error && (
-          <div className="bg-red-500 text-white p-2 rounded-md mb-3">
+          <div className="bg-red-500 text-white p-3 rounded-md mb-4">
             {error}
           </div>
         )}
         
         <div className="text-center">
-          {gameState.players.length >= 2 ? (
-            <button
-              className="px-6 py-2.5 bg-gradient-to-r from-yellow-500 to-yellow-600 hover:from-yellow-400 hover:to-yellow-500 text-white font-bold rounded-md shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-              onClick={handleStartGame}
-              disabled={isLoading}
-            >
-              {isLoading ? '게임 시작 중...' : '게임 시작하기'}
-            </button>
-          ) : (
-            <p className="text-yellow-400">게임을 시작하려면 최소 2명의 플레이어가 필요합니다.</p>
-          )}
+          <button
+            className={`py-3 px-6 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-500 hover:to-green-600 text-white font-bold rounded-md shadow-lg transition-all ${
+              isLoading ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
+            onClick={handleStartGame}
+            disabled={isLoading || gameState.players.length < 2}
+          >
+            {isLoading ? '처리 중...' : '게임 시작'}
+          </button>
+        </div>
+        
+        {gameState.players.length < 2 && (
+          <p className="text-red-400 text-center mt-2">최소 2명의 플레이어가 필요합니다.</p>
+        )}
+        
+        <div className="mt-4 text-gray-300 text-center text-sm">
+          <p>게임 ID: {gameState.id}</p>
+          <p className="mt-1">이 ID를 친구들에게 공유하여 같이 게임하세요!</p>
         </div>
       </div>
     );
   }
 
-  // 게임 진행 중 컨트롤
-  return (
-    <div className="p-3 bg-gray-900 bg-opacity-90 rounded-lg border border-yellow-500 shadow-lg">
-      <h3 className="text-lg font-bold text-center mb-2 text-yellow-400">
-        게임 진행 중
-      </h3>
-      
-      {error && (
-        <div className="bg-red-500 text-white p-2 rounded-md mb-2 text-sm">
-          {error}
-        </div>
-      )}
-      
-      <div className="mb-2 text-center">
-        <p className="text-white text-sm">
-          현재 판돈: <span className="text-yellow-400 font-bold">{gameState.bettingValue.toLocaleString()} P</span>
-          {isCurrentTurn && <span className="block text-green-400 mt-1">내 차례입니다!</span>}
-        </p>
-      </div>
-      
-      <div className="grid grid-cols-3 gap-2">
-        {/* 콜 버튼 */}
-        <BettingButton 
-          imageSrc={buttonImages.call}
-          label="콜"
-          onClick={handleCall}
-          disabled={!isCurrentTurn || !hasPreviousBet()}
-        />
-        
-        {/* 다이 버튼 */}
-        <BettingButton 
-          imageSrc={buttonImages.die}
-          label="다이"
-          onClick={handleDie}
-          disabled={!isCurrentTurn}
-        />
-        
-        {/* 체크 버튼 */}
-        <BettingButton
-          imageSrc={buttonImages.ping}
-          label="체크"
-          onClick={handleCheck}
-          disabled={!isCurrentTurn || hasPreviousBet()}
-        />
-        
-        {/* 하프 버튼 */}
-        <BettingButton 
-          imageSrc={buttonImages.half}
-          label="하프"
-          onClick={handleHalf}
-          disabled={!isCurrentTurn}
-        />
-        
-        {/* 따당 버튼 */}
-        <BettingButton 
-          imageSrc={buttonImages.quarter}
-          label="따당"
-          onClick={handleDoubleQuarter}
-          disabled={!isCurrentTurn}
-        />
-        
-        {/* 베팅 입력 영역 */}
-        <div className="flex flex-col space-y-1">
-          <div className="flex rounded-md overflow-hidden">
-            <input
-              type="number"
-              min="1"
-              step="100"
-              value={betAmount}
-              onChange={(e) => setBetAmount(parseInt(e.target.value))}
-              className="w-full p-1 bg-gray-800 text-white text-sm border border-gray-700"
-            />
+  if (isGamePlaying) {
+    return (
+      <div className="p-4 bg-gray-900 bg-opacity-95 backdrop-blur-sm rounded-lg border border-yellow-500 shadow-xl">
+        {/* 화면이 테이블 위에 겹쳐질 때는 컴팩트하게 표시 */}
+        <div className="flex justify-between items-center mb-2">
+          <h2 className="text-lg font-bold text-yellow-400">게임 진행 중</h2>
+          <div className="text-right">
+            <p className="text-yellow-400 font-bold">{gameState.bettingValue} 포인트</p>
+          {currentPlayer && (
+              <p className="text-xs text-gray-300">내 잔액: {currentPlayer.balance} P</p>
+          )}
           </div>
-          <button
-            className={`px-2 py-1 bg-gradient-to-r from-yellow-600 to-yellow-700 hover:from-yellow-500 hover:to-yellow-600 text-white font-bold rounded-md shadow transition-all text-sm ${
-              !isCurrentTurn ? 'opacity-50 cursor-not-allowed' : ''
-            }`}
-            onClick={() => handleBet()}
-            disabled={!isCurrentTurn}
-          >
-            베팅
-          </button>
         </div>
+        
+        {error && (
+          <div className="bg-red-500 text-white p-2 rounded-md mb-2 text-xs">
+            {error}
+          </div>
+        )}
+        
+        {isCurrentTurn ? (
+          <div>
+            <p className="text-green-400 font-bold text-sm mb-2">내 턴입니다!</p>
+            
+            {/* 커스텀 베팅 입력 */}
+            <div className="mb-3">
+              <div className="flex space-x-2">
+              <input
+                type="number"
+                value={betAmount}
+                onChange={(e) => setBetAmount(parseInt(e.target.value) || 0)}
+                min={100}
+                max={currentPlayer?.balance || 0}
+                step={100}
+                  className="flex-grow px-2 py-1 bg-gray-800 rounded-md border border-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                disabled={isLoading}
+              />
+                <button
+                  className="px-3 py-1 bg-yellow-600 hover:bg-yellow-500 text-white font-bold rounded-md shadow transition-all text-sm"
+                  onClick={() => handleBet()}
+                  disabled={isLoading || !currentPlayer || betAmount <= 0 || betAmount > currentPlayer.balance}
+                >
+                  베팅
+                </button>
+              </div>
+            </div>
+            
+            {/* 배팅 이미지 버튼 - 화면 아래쪽 배치 */}
+            <div className="grid grid-cols-3 gap-2 mt-2">
+              {/* 체크 버튼 - 이전 베팅이 없을 때만 표시 */}
+              {!hasPreviousBet() && (
+                <BettingButton
+                  imageSrc="/images/ui/checkbtn.png"
+                  label="체크"
+                  onClick={handleCheck}
+                  disabled={isLoading}
+                />
+              )}
+              
+              <BettingButton
+                imageSrc={buttonImages.call}
+                label="콜"
+                onClick={handleCall}
+                disabled={isLoading || !hasPreviousBet()}
+              />
+              
+              <BettingButton
+                imageSrc={buttonImages.bet}
+                label="따당"
+                onClick={handleDouble}
+                disabled={isLoading || (currentPlayer?.balance || 0) < gameState.bettingValue * 2}
+              />
+              
+              <BettingButton
+                imageSrc={buttonImages.quarter}
+                label="쿼터"
+                onClick={() => handleBet(Math.floor(gameState.bettingValue / 4))}
+                disabled={isLoading || Math.floor(gameState.bettingValue / 4) <= 0 || (currentPlayer?.balance || 0) < Math.floor(gameState.bettingValue / 4)}
+              />
+              
+              <BettingButton
+                imageSrc={buttonImages.half}
+                label="하프"
+                onClick={handleHalf}
+                disabled={isLoading}
+              />
+              
+              <BettingButton
+                imageSrc={buttonImages.die}
+                label="다이"
+                onClick={handleDie}
+                disabled={isLoading}
+              />
+            </div>
+          </div>
+        ) : (
+          <div>
+            <p className="text-blue-400 mb-2 text-sm">
+              <span className="font-bold">{gameState.players.find(p => p.id === gameState.currentTurn)?.username || '알 수 없음'}</span>님의 차례입니다
+            </p>
+            
+            <div className="flex justify-end">
+              <div className="w-1/2">
+                <BettingButton
+                  imageSrc={buttonImages.die}
+                  label="다이 (포기)"
+                  onClick={handleDie}
+                  disabled={isLoading || currentPlayer?.isDie}
+                />
+              </div>
+            </div>
+          </div>
+        )}
       </div>
-      
-      <div className="mt-2">
-        <p className="text-yellow-300 text-xs text-center">내 잔액: {currentPlayer?.balance.toLocaleString() || 0} P</p>
-      </div>
+    );
+  }
+
+  return (
+    <div className="p-6 bg-gray-900 bg-opacity-90 rounded-lg border border-yellow-500 shadow-lg">
+      <p className="text-gray-300 text-center">게임 상태를 불러오는 중...</p>
     </div>
   );
 } 

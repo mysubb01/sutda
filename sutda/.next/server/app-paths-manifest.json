@@ -1,7 +1,6 @@
 {
-  "/_not-found/page": "app/_not-found/page.js",
-  "/game/join/page": "app/game/join/page.js",
-  "/game/new/page": "app/game/new/page.js",
   "/page": "app/page.js",
-  "/game/[id]/page": "app/game/[id]/page.js"
+  "/game/new/page": "app/game/new/page.js",
+  "/game/[id]/page": "app/game/[id]/page.js",
+  "/game/create/page": "app/game/create/page.js"
 }

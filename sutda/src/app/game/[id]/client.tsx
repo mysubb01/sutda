@@ -1,9 +1,16 @@
 'use client';
 
+// Window 객체에 커스텀 속성 추가
+declare global {
+  interface Window {
+    _isSeatChanging?: boolean;
+  }
+}
+
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { GameState, Message } from '@/types/game';
-import { getGameState, joinGame } from '@/lib/gameApi';
+import { getGameState, joinGame, updateSeat } from '@/lib/gameApi';
 import { GameTable } from '@/components/GameTable';
 import { GameControls } from '@/components/GameControls';
 import { Chat } from '@/components/Chat';
@@ -27,6 +34,8 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [reconnected, setReconnected] = useState(false);
+  const [isObserver, setIsObserver] = useState(true); // 처음에는 관찰자 모드로 시작
+  const [isSeatChanging, setIsSeatChanging] = useState(false); // 좌석 변경 중 상태
   
   // 메시지 불러오기
   const fetchMessages = async () => {
@@ -61,6 +70,38 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
     }
   };
   
+  // 자리 변경 처리 함수
+  const handleSeatChange = async (seatIndex: number) => {
+    try {
+      // 좌석 변경 중 플래그 설정 (폴링 일시 중지)
+      setIsSeatChanging(true);
+      
+      // 좌석 변경 API 호출
+      await updateSeat(gameId, playerId!, seatIndex);
+      
+      // 성공 메시지
+      toast.success('좌석이 변경되었습니다.');
+      
+      // 로컬 스토리지에도 좌석 정보 저장 (복구 용도)
+      localStorage.setItem(`game_${gameId}_seat_index`, String(seatIndex));
+      
+      // 강제로 상태 업데이트 (변경된 좌석 정보 반영)
+      await fetchGameState();
+      
+      console.log('좌석 변경 완료:', seatIndex);
+      
+      // 폴링 재개 - 약간의 지연 추가
+      setTimeout(() => {
+        setIsSeatChanging(false);
+        console.log('좌석 변경 완료 후 폴링 재개');
+      }, 1000);
+    } catch (err) {
+      console.error('좌석 변경 오류:', err);
+      toast.error('좌석을 변경할 수 없습니다.');
+      setIsSeatChanging(false); // 오류 발생 시에도 폴링 재개
+    }
+  };
+  
   // 게임 참가 및 구독 설정
   useEffect(() => {
     // 로컬 스토리지에서 플레이어 정보 가져오기
@@ -71,15 +112,26 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
       console.log('저장된 플레이어 정보 발견:', storedPlayerId, storedUsername);
       setPlayerId(storedPlayerId);
       setUsername(storedUsername);
+      setIsObserver(false); // 이미 참가한 플레이어인 경우 관찰자 모드 해제
+      
+      // 최근 자리 변경 정보 확인 (존재하면 복원 시도)
+      const lastSeatIndex = localStorage.getItem(`game_${gameId}_seat_index`);
       
       // 초기 데이터 로드
       fetchGameState();
       fetchMessages();
       
+      // 좌석 변경 중 플래그
+      let isChangingSeat = false;
+      
       // 폴링 설정 - 정기적으로 데이터 갱신
-      const gameStateInterval = setInterval(() => {
-        console.log('게임 상태 폴링...');
-        fetchGameState();
+      const gameStateInterval = setInterval(async () => {
+        console.log('게임 상태 폴링...', isSeatChanging ? '(좌석 변경 중)' : '');
+        
+        // 좌석 변경 중이 아닐 때만 폴링
+        if (!isSeatChanging) {
+          await fetchGameState();
+        }
       }, 1000); // 1초마다로 변경하여 반응성 향상
       
       const messagesInterval = setInterval(() => {
@@ -93,6 +145,24 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
         clearInterval(messagesInterval);
         console.log('폴링 인터벌 정리 완료');
       };
+    } else {
+      // 플레이어 정보가 없으면 기본 게임 상태 로딩
+      fetchGameState();
+      fetchMessages();
+      
+      // 관찰자 모드를 위한 폴링 설정
+      const observerGameStateInterval = setInterval(() => {
+        fetchGameState();
+      }, 2000); // 2초마다 (관찰자는 더 낮은 빈도로 업데이트)
+      
+      const observerMessagesInterval = setInterval(() => {
+        fetchMessages();
+      }, 2000); // 2초마다
+      
+      return () => {
+        clearInterval(observerGameStateInterval);
+        clearInterval(observerMessagesInterval);
+      };
     }
   }, [gameId]);
   
@@ -102,7 +172,8 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
     return () => {}; // 빈 정리 함수
   };
 
-  // 게임 참가 처리
+  // 게임 참가 처리 - 관찰자 모드에서는 호출되지 않음
+  // 대신 GameTable의 handleSeatClick에서 직접 처리
   const handleJoinGame = async (username: string) => {
     if (!username.trim()) {
       setError('닉네임을 입력해주세요.');
@@ -122,6 +193,7 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
       setPlayerId(newPlayerId);
       setUsername(username);
       setGameState(newGameState);
+      setIsObserver(false); // 참가 후 관찰자 모드 해제
       
       // 최초 참가 시 메시지 불러오기
       fetchMessages();
@@ -133,6 +205,18 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
     } finally {
       setIsJoining(false);
     }
+  };
+  
+  // 관찰자 모드에서 플레이어로 전환
+  const handleObserverToPlayer = (newPlayerId: string, newUsername: string) => {
+    setPlayerId(newPlayerId);
+    setUsername(newUsername);
+    setIsObserver(false);
+    toast.success('게임에 참가했습니다!');
+    
+    // 폴링 빈도 조정 (참가자는 더 높은 빈도로 업데이트)
+    fetchGameState();
+    fetchMessages();
   };
   
   // 액션 후 게임 상태 갱신
@@ -170,7 +254,7 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
 
   // 현재 턴 변경 시 효과음 및 알림
   useEffect(() => {
-    if (!isPlaying) return;
+    if (!isPlaying || isObserver) return; // 관찰자 모드에서는 턴 알림 없음
     
     if (isCurrentTurn) {
       toast.success('당신의 턴입니다!', { duration: 3000 });
@@ -179,7 +263,7 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
       audio.volume = 0.5;
       audio.play().catch(e => console.log('효과음 재생 실패:', e));
     }
-  }, [gameState?.currentTurn, isPlaying, isCurrentTurn]);
+  }, [gameState?.currentTurn, isPlaying, isCurrentTurn, isObserver]);
   
   // 승자 결정 시 효과음 및 알림
   useEffect(() => {
@@ -193,15 +277,17 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
         const audio = new Audio('/sounds/win.mp3');
         audio.volume = 0.5;
         audio.play().catch(e => console.log('효과음 재생 실패:', e));
-      } else {
+      } else if (!isObserver) { // 관찰자가 아닌 경우에만 패배 효과음
         toast.error(`${winnerName}님이 승리했습니다`, { duration: 5000 });
         // 패배 효과음
         const audio = new Audio('/sounds/lose.mp3');
         audio.volume = 0.3;
         audio.play().catch(e => console.log('효과음 재생 실패:', e));
+      } else { // 관찰자인 경우
+        toast(`${winnerName}님이 승리했습니다`, { duration: 5000 });
       }
     }
-  }, [isFinished, gameState?.winner, playerId, gameState?.players]);
+  }, [isFinished, gameState?.winner, playerId, gameState?.players, isObserver]);
   
   // 재경기 처리 시 알림
   useEffect(() => {
@@ -226,122 +312,85 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
   }, [isRegame]);
   
   // 이미 참가한 상태지만 게임 상태를 로딩 중인 경우
-  if (playerId && !gameState) {
+  if (!gameState) {
     return <GameTableSkeleton />;
   }
   
-  // 이미 참가한 상태이고 게임 상태가 로드된 경우
-  if (playerId && gameState) {
-    return (
-      <div className="min-h-screen w-full bg-gray-950 relative overflow-hidden">
-        {/* 테이블 배경 효과 */}
-        <div 
-          className="absolute inset-0 overflow-hidden"
-          style={{
-            background: 'linear-gradient(to bottom, #1a2035, #0a0a1a)',
-            backgroundImage: 'url(/images/table/bgM.png)',
-            backgroundSize: 'cover',
-            backgroundPosition: 'center',
-            filter: 'blur(8px)',
-            opacity: 0.3,
-            transform: 'scale(1.1)'
-          }}
-        />
-        
-        <div className="container mx-auto p-4 relative z-10">
-          <div className="flex flex-col md:flex-row gap-6 h-[calc(100vh-2rem)]">
-            {/* 게임 테이블 영역 */}
-            <div className="flex-grow rounded-xl overflow-hidden shadow-2xl bg-gray-900 bg-opacity-50 border border-gray-800 relative">
-              <GameTable 
-                gameState={gameState} 
-                currentPlayerId={playerId}
-                gameId={gameId}
-                fetchGameState={fetchGameState}
-              />
-              
-              {/* 게임 컨트롤 (오른쪽 아래에 위치) */}
-              {gameState.status === 'playing' && (
-                <div className="absolute bottom-4 right-4 md:bottom-6 md:right-6 w-full max-w-xs md:max-w-sm z-20">
-                  <GameControls 
-                    gameState={gameState} 
-                    currentPlayerId={playerId}
-                    onAction={handleAfterAction} 
-                  />
-                </div>
-              )}
-            </div>
+  // 게임 상태를 체크하는 부분에서 로그 추가
+  console.log('게임 상태 체크:', {
+    gameState: !!gameState,
+    playerId: playerId,
+    isObserver: isObserver, 
+    playerCount: gameState?.players.length
+  });
+  
+  // 게임 상태가 로드된 경우 (관찰자/참가자 모두)
+  return (
+    <div className="min-h-screen w-full bg-gray-950 relative overflow-hidden">
+      {/* 테이블 배경 효과 */}
+      <div 
+        className="absolute inset-0 overflow-hidden"
+        style={{
+          background: 'linear-gradient(to bottom, #1a2035, #0a0a1a)',
+          backgroundImage: 'url(/images/table/bgM.png)',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          filter: 'blur(8px)',
+          opacity: 0.3,
+          transform: 'scale(1.1)'
+        }}
+      />
+      
+      <div className="container mx-auto p-4 relative z-10">
+        <div className="flex flex-col md:flex-row gap-6 h-[calc(100vh-2rem)]">
+          {/* 게임 테이블 영역 */}
+          <div className="flex-grow rounded-xl overflow-hidden shadow-2xl bg-gray-900 bg-opacity-50 border border-gray-800 relative">
+            <GameTable 
+              gameState={gameState} 
+              currentPlayerId={playerId || ''}
+              gameId={gameId}
+              fetchGameState={fetchGameState}
+              isObserver={isObserver}
+              onPlayerJoined={handleObserverToPlayer}
+              onSeatChange={handleSeatChange}
+            />
             
-            {/* 우측 정보 패널 */}
-            <div className="w-full md:w-80 lg:w-96 flex flex-col space-y-4">
-              {/* 게임 컨트롤 (대기 및 종료 상태용) */}
-              {gameState.status !== 'playing' && (
-                <div className="h-auto">
-                  <GameControls 
-                    gameState={gameState} 
-                    currentPlayerId={playerId}
-                    onAction={handleAfterAction} 
-                  />
-                </div>
-              )}
-              
-              {/* 채팅 */}
-              <div className="flex-grow h-auto overflow-hidden">
-                <Chat 
-                  gameId={gameId} 
-                  playerId={playerId} 
-                  username={username}
-                  messages={messages}
+            {/* 게임 컨트롤 (오른쪽 아래에 위치) */}
+            {gameState.status === 'playing' && playerId && (
+              <div className="absolute bottom-4 right-4 md:bottom-6 md:right-6 w-full max-w-xs md:max-w-sm z-20">
+                <GameControls 
+                  gameState={gameState} 
+                  currentPlayerId={playerId}
+                  onAction={handleAfterAction} 
                 />
               </div>
+            )}
+          </div>
+          
+          {/* 우측 정보 패널 */}
+          <div className="w-full md:w-80 lg:w-96 flex flex-col space-y-4">
+            {/* 게임 컨트롤 (대기 및 종료 상태용) */}
+            {gameState.status !== 'playing' && playerId && (
+              <div className="h-auto">
+                <GameControls 
+                  gameState={gameState} 
+                  currentPlayerId={playerId}
+                  onAction={handleAfterAction} 
+                />
+              </div>
+            )}
+            
+            {/* 채팅 */}
+            <div className="flex-grow h-auto overflow-hidden">
+              <Chat 
+                gameId={gameId} 
+                playerId={playerId || ''} 
+                username={username}
+                messages={messages}
+              />
             </div>
           </div>
         </div>
-      </div>
-    );
-  }
-  
-  // 게임 참가 폼
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-950">
-      <div className="w-full max-w-md p-8 bg-gray-900 rounded-lg shadow-lg border border-yellow-800">
-        <h1 className="text-2xl font-bold text-center text-yellow-400 mb-6">섯다 게임 참가</h1>
-        
-        {error && (
-          <div className="bg-red-600 text-white p-3 rounded-md mb-4">
-            {error}
-          </div>
-        )}
-        
-        <form onSubmit={(e) => {
-          e.preventDefault();
-          handleJoinGame(username);
-        }}>
-          <div className="mb-4">
-            <label htmlFor="username" className="block text-sm font-bold text-gray-300 mb-2">
-              닉네임
-            </label>
-            <input
-              type="text"
-              id="username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              className="w-full px-3 py-2 bg-gray-800 text-white rounded-md focus:outline-none focus:ring-2 focus:ring-yellow-500"
-              placeholder="게임에서 사용할 닉네임을 입력하세요"
-              disabled={isJoining}
-              required
-            />
-          </div>
-          
-          <button
-            type="submit"
-            disabled={isJoining || !username.trim()}
-            className={`w-full py-3 bg-gradient-to-r from-yellow-600 to-yellow-700 hover:from-yellow-500 hover:to-yellow-600 text-white font-bold rounded-md shadow-lg transition-all ${
-              isJoining || !username.trim() ? 'opacity-50 cursor-not-allowed' : ''
-            }`}
-          >
-            {isJoining ? '참가 중...' : '게임 참가하기'}
-          </button>
-        </form>
       </div>
     </div>
   );
