@@ -8,84 +8,115 @@ import { v4 as uuidv4 } from 'uuid';
 export async function createGame(username: string): Promise<CreateGameResponse> {
   const gameId = uuidv4();
   const playerId = uuidv4();
+  // 임시 사용자 ID 생성
+  const userId = `user_${Math.random().toString(36).substring(2, 9)}`;
   
-  // 게임 생성
-  const { error: gameError } = await supabase
-    .from('games')
-    .insert({
-      id: gameId,
-      status: 'waiting',
-      current_turn: null,
-      betting_value: 0,
-      winner: null
-    });
-  
-  if (gameError) {
-    console.error('게임 생성 오류:', gameError);
-    throw new Error('게임을 생성할 수 없습니다.');
+  try {
+    // 게임 생성
+    const { data: gameData, error: gameError } = await supabase
+      .from('games')
+      .insert({
+        id: gameId,
+        status: 'waiting',
+        current_turn: null,
+        betting_value: 0,
+        winner: null
+      })
+      .select();
+    
+    if (gameError) {
+      console.error('게임 생성 오류 세부 정보:', gameError);
+      throw new Error('게임을 생성할 수 없습니다: ' + gameError.message);
+    }
+    
+    console.log('게임 생성 성공:', gameId);
+    
+    // 플레이어 생성
+    const { data: playerData, error: playerError } = await supabase
+      .from('players')
+      .insert({
+        id: playerId,
+        game_id: gameId,
+        user_id: userId,
+        username,
+        balance: 10000,
+        is_die: false
+      })
+      .select();
+    
+    if (playerError) {
+      console.error('플레이어 생성 오류 세부 정보:', playerError);
+      throw new Error('플레이어를 생성할 수 없습니다: ' + playerError.message);
+    }
+    
+    console.log('플레이어 생성 성공:', playerId);
+    
+    // 로컬 스토리지에 사용자 정보 저장
+    localStorage.setItem(`game_${gameId}_user_id`, userId);
+    
+    return { gameId, playerId };
+  } catch (err) {
+    console.error('게임 생성 중 예외 발생:', err);
+    throw err;
   }
-  
-  // 플레이어 생성
-  const { error: playerError } = await supabase
-    .from('players')
-    .insert({
-      id: playerId,
-      game_id: gameId,
-      username,
-      balance: 10000,
-      is_die: false
-    });
-  
-  if (playerError) {
-    console.error('플레이어 생성 오류:', playerError);
-    throw new Error('플레이어를 생성할 수 없습니다.');
-  }
-  
-  return { gameId, playerId };
 }
 
 /**
  * 기존 게임에 참가
  */
 export async function joinGame(gameId: string, username: string): Promise<JoinGameResponse> {
-  // 게임 상태 체크
-  const { data: gameData, error: gameError } = await supabase
-    .from('games')
-    .select('*')
-    .eq('id', gameId)
-    .single();
-  
-  if (gameError || !gameData) {
-    console.error('게임 조회 오류:', gameError);
-    throw new Error('게임을 찾을 수 없습니다.');
+  try {
+    // 게임 상태 체크
+    const { data: gameData, error: gameError } = await supabase
+      .from('games')
+      .select('*')
+      .eq('id', gameId)
+      .single();
+
+    if (gameError || !gameData) {
+      console.error('게임 조회 오류 세부 정보:', gameError);
+      throw new Error('게임을 찾을 수 없습니다: ' + (gameError?.message || '알 수 없는 오류'));
+    }
+    
+    if (gameData.status !== 'waiting') {
+      throw new Error('이미 시작된 게임에는 참가할 수 없습니다.');
+    }
+    
+    const playerId = uuidv4();
+    // 임시 사용자 ID 생성
+    const userId = `user_${Math.random().toString(36).substring(2, 9)}`;
+    
+    // 플레이어 생성
+    const { data: playerData, error: playerError } = await supabase
+      .from('players')
+      .insert({
+        id: playerId,
+        game_id: gameId,
+        user_id: userId,
+        username,
+        balance: 10000,
+        is_die: false
+      })
+      .select();
+    
+    if (playerError) {
+      console.error('플레이어 생성 오류 세부 정보:', playerError);
+      throw new Error('게임에 참가할 수 없습니다: ' + playerError.message);
+    }
+    
+    console.log('플레이어 참가 성공:', playerId);
+    
+    // 로컬 스토리지에 사용자 정보 저장
+    localStorage.setItem(`game_${gameId}_user_id`, userId);
+    
+    // 최신 게임 상태 가져오기
+    const gameState = await getGameState(gameId);
+    
+    return { playerId, gameState };
+  } catch (err) {
+    console.error('게임 참가 중 예외 발생:', err);
+    throw err;
   }
-  
-  if (gameData.status !== 'waiting') {
-    throw new Error('이미 시작된 게임에는 참가할 수 없습니다.');
-  }
-  
-  const playerId = uuidv4();
-  
-  // 플레이어 생성
-  const { error: playerError } = await supabase
-    .from('players')
-    .insert({
-      id: playerId,
-      game_id: gameId,
-      username,
-      balance: 10000,
-      is_die: false
-    });
-  
-  if (playerError) {
-    console.error('플레이어 생성 오류:', playerError);
-    throw new Error('게임에 참가할 수 없습니다.');
-  }
-  
-  // 최신 게임 상태 가져오기
-  const gameState = await getGameState(gameId);
-  
-  return { playerId, gameState };
 }
 
 /**
@@ -98,7 +129,7 @@ export async function getGameState(gameId: string): Promise<GameState> {
     .select('*')
     .eq('id', gameId)
     .single();
-  
+
   if (gameError || !gameData) {
     console.error('게임 조회 오류:', gameError);
     throw new Error('게임을 찾을 수 없습니다.');
@@ -121,6 +152,7 @@ export async function getGameState(gameId: string): Promise<GameState> {
     status: gameData.status,
     players: playersData.map(player => ({
       id: player.id,
+      user_id: player.user_id,
       username: player.username,
       balance: player.balance,
       cards: player.cards || [],
@@ -143,7 +175,7 @@ export async function startGame(gameId: string): Promise<void> {
     .from('players')
     .select('id')
     .eq('game_id', gameId);
-  
+
   if (playersError || !playersData || playersData.length < 2) {
     throw new Error('최소 2명의 플레이어가 필요합니다.');
   }
@@ -211,14 +243,14 @@ export async function placeBet(gameId: string, playerId: string, amount: number)
   if (!player) {
     throw new Error('플레이어를 찾을 수 없습니다.');
   }
-  
+
   if (player.balance < amount) {
     throw new Error('잔액이 부족합니다.');
   }
-  
+
   // 다음 플레이어 결정
   const nextPlayerTurnId = getNextPlayerTurn(gameState.players, playerId);
-  
+
   // 게임 상태 업데이트
   const { error: gameUpdateError } = await supabase
     .from('games')
@@ -269,25 +301,25 @@ export async function callBet(gameId: string, playerId: string): Promise<void> {
   if (!player) {
     throw new Error('플레이어를 찾을 수 없습니다.');
   }
-  
+
   // 기본 콜 금액은 500
   const callAmount = 500;
-  
+
   if (player.balance < callAmount) {
     throw new Error('잔액이 부족합니다.');
   }
-  
+
   // 다음 플레이어 결정
   const nextPlayerTurnId = getNextPlayerTurn(gameState.players, playerId);
-  
+
   // 게임 상태 업데이트
   const { error: gameUpdateError } = await supabase
-    .from('games')
-    .update({
+        .from('games')
+        .update({
       current_turn: nextPlayerTurnId,
       betting_value: gameState.bettingValue + callAmount
-    })
-    .eq('id', gameId);
+        })
+        .eq('id', gameId);
   
   if (gameUpdateError) {
     console.error('게임 상태 업데이트 오류:', gameUpdateError);
@@ -297,7 +329,7 @@ export async function callBet(gameId: string, playerId: string): Promise<void> {
   // 플레이어 잔액 업데이트
   const { error: playerUpdateError } = await supabase
     .from('players')
-    .update({
+      .update({
       balance: player.balance - callAmount
     })
     .eq('id', playerId);
@@ -321,7 +353,7 @@ export async function dieBet(gameId: string, playerId: string): Promise<void> {
   if (gameState.status !== 'playing') {
     throw new Error('게임이 진행 중이 아닙니다.');
   }
-  
+
   if (gameState.currentTurn !== playerId) {
     throw new Error('당신의 턴이 아닙니다.');
   }
@@ -345,7 +377,7 @@ export async function dieBet(gameId: string, playerId: string): Promise<void> {
   if (activePlayers.length === 1) {
     // 한 명만 남았으면 게임 종료
     const winner = activePlayers[0].id;
-    
+
     // 승자의 잔액 업데이트
     const { error: winnerUpdateError } = await supabase
       .from('players')
@@ -361,12 +393,12 @@ export async function dieBet(gameId: string, playerId: string): Promise<void> {
     
     // 게임 종료 상태 업데이트
     const { error: gameUpdateError } = await supabase
-      .from('games')
-      .update({
-        status: 'finished',
+          .from('games')
+          .update({
+            status: 'finished',
         winner: winner
-      })
-      .eq('id', gameId);
+          })
+          .eq('id', gameId);
     
     if (gameUpdateError) {
       console.error('게임 종료 상태 업데이트 오류:', gameUpdateError);
@@ -375,7 +407,7 @@ export async function dieBet(gameId: string, playerId: string): Promise<void> {
   } else {
     // 다음 플레이어 결정
     const nextPlayerTurnId = getNextPlayerTurn(gameState.players, playerId);
-    
+
     // 게임 상태 업데이트
     const { error: gameUpdateError } = await supabase
       .from('games')
@@ -405,7 +437,7 @@ export async function sendMessage(gameId: string, playerId: string, content: str
   // 플레이어 정보 가져오기
   const { data: playerData, error: playerError } = await supabase
     .from('players')
-    .select('username')
+    .select('username, user_id')
     .eq('id', playerId)
     .single();
   
@@ -419,14 +451,14 @@ export async function sendMessage(gameId: string, playerId: string, content: str
     .from('messages')
     .insert({
       game_id: gameId,
-      player_id: playerId,
+      user_id: playerData.user_id,
       username: playerData.username,
       content: content
     });
   
   if (messageError) {
     console.error('메시지 저장 오류:', messageError);
-    throw new Error('메시지를 전송할 수 없습니다.');
+    throw new Error('메시지를 전송할 수 없습니다: ' + messageError.message);
   }
 }
 
@@ -447,7 +479,7 @@ async function recordGameAction(
       action_type: actionType,
       amount: amount
     });
-  
+
   if (error) {
     console.error('게임 액션 기록 오류:', error);
     // 액션 기록 실패는 게임 진행에 치명적이지 않으므로 오류를 던지지 않음

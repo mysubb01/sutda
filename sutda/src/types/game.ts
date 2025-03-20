@@ -13,6 +13,7 @@ export type CardStatus = 'hidden' | 'showing' | 'open';
  */
 export interface Player {
   id: string;
+  user_id: string;
   username: string;
   balance: number;
   cards?: number[];
@@ -27,8 +28,9 @@ export interface Message {
   id: string;
   content: string;
   username: string;
+  user_id: string;
   created_at: string;
-  player_id: string;
+  player_id?: string;
   game_id: string;
 }
 
