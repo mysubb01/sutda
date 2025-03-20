@@ -469,15 +469,6 @@ export async function sendMessage(gameId: string, playerId: string, content: str
     console.error('메시지 저장 오류:', messageError);
     throw new Error('메시지를 전송할 수 없습니다: ' + messageError.message);
   }
-  
-  // 브로드캐스트 채널로 메시지 전송 (실시간 알림)
-  const channel = supabase.channel(`chat-${gameId}`);
-  channel.subscribe();
-  channel.send({
-    type: 'broadcast',
-    event: 'new-message',
-    payload: messageData
-  });
 }
 
 /**

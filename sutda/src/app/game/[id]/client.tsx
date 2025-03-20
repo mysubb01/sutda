@@ -66,129 +66,35 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
       console.log('저장된 플레이어 정보 발견:', storedPlayerId, storedUsername);
       setPlayerId(storedPlayerId);
       setUsername(storedUsername);
+      
+      // 초기 데이터 로드
       fetchGameState();
       fetchMessages();
-      setupSubscriptions(storedPlayerId);
+      
+      // 폴링 설정 - 정기적으로 데이터 갱신
+      const gameStateInterval = setInterval(() => {
+        console.log('게임 상태 폴링...');
+        fetchGameState();
+      }, 2000); // 2초마다
+      
+      const messagesInterval = setInterval(() => {
+        console.log('메시지 폴링...');
+        fetchMessages();
+      }, 1000); // 1초마다
+      
+      // 컴포넌트 언마운트 시 인터벌 정리
+      return () => {
+        clearInterval(gameStateInterval);
+        clearInterval(messagesInterval);
+        console.log('폴링 인터벌 정리 완료');
+      };
     }
   }, [gameId]);
   
-  // 실시간 구독 설정
+  // 실시간 구독 설정 - 폴링으로 대체되어 필요 없음
   const setupSubscriptions = (pid: string) => {
-    console.log('실시간 구독 설정 시작...', pid);
-    
-    // 중복 구독 방지
-    if (isSubscribed) {
-      console.log('이미 구독 중입니다. 중복 구독 방지.');
-      return;
-    }
-    
-    try {
-      // 게임 상태 변경 구독
-      const gameChannel = supabase
-        .channel(`game-${gameId}-changes`)
-        .on('postgres_changes', {
-          event: '*',
-          schema: 'public',
-          table: 'games',
-          filter: `id=eq.${gameId}`
-        }, (payload) => {
-          console.log('게임 상태 변경 감지:', payload);
-          fetchGameState();
-        });
-        
-      // 플레이어 변경 구독  
-      const playersChannel = supabase
-        .channel(`game-${gameId}-players`)
-        .on('postgres_changes', {
-          event: '*',
-          schema: 'public',
-          table: 'players',
-          filter: `game_id=eq.${gameId}`
-        }, (payload) => {
-          console.log('플레이어 변경 감지:', payload);
-          fetchGameState();
-        });
-        
-      // 게임 액션 구독
-      const actionsChannel = supabase
-        .channel(`game-${gameId}-actions`)
-        .on('postgres_changes', {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'game_actions',
-          filter: `game_id=eq.${gameId}`
-        }, (payload) => {
-          console.log('게임 액션 감지:', payload);
-          fetchGameState();
-        });
-        
-        // 채팅 브로드캐스트 구독 (실시간 메시지 수신)
-        const chatChannel = supabase
-          .channel(`chat-${gameId}`)
-          .on('broadcast', { event: 'new-message' }, (payload) => {
-            console.log('브로드캐스트 메시지 수신:', payload);
-            
-            // 새 메시지 추가 (중복 방지)
-            const newMessage = payload.payload as Message;
-            setMessages(prev => {
-              // 이미 같은 ID의 메시지가 있는지 확인
-              if (prev.some(msg => msg.id === newMessage.id)) {
-                return prev;
-              }
-              return [...prev, newMessage];
-            });
-          });
-      
-      // 채널 구독 시작 및 상태 모니터링
-      gameChannel.subscribe((status) => {
-        console.log(`게임 채널 상태: ${status}`);
-        if (status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') {
-          console.log('게임 채널 재연결 시도...');
-          gameChannel.subscribe();
-        }
-      });
-      
-      playersChannel.subscribe((status) => {
-        console.log(`플레이어 채널 상태: ${status}`);
-        if (status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') {
-          console.log('플레이어 채널 재연결 시도...');
-          playersChannel.subscribe();
-        }
-      });
-      
-      actionsChannel.subscribe((status) => {
-        console.log(`액션 채널 상태: ${status}`);
-        if (status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') {
-          console.log('액션 채널 재연결 시도...');
-          actionsChannel.subscribe();
-        }
-      });
-      
-      chatChannel.subscribe((status) => {
-        console.log(`채팅 채널 상태: ${status}`);
-        if (status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') {
-          console.log('채팅 채널 재연결 시도...');
-          chatChannel.subscribe();
-        }
-      });
-      
-      setIsSubscribed(true);
-      console.log('모든 실시간 구독이 설정되었습니다.');
-      
-      // 컴포넌트 언마운트 시 구독 정리
-      return () => {
-        console.log('구독 정리 시작...');
-        supabase.removeChannel(gameChannel);
-        supabase.removeChannel(playersChannel);
-        supabase.removeChannel(actionsChannel);
-        supabase.removeChannel(chatChannel);
-        setIsSubscribed(false);
-        console.log('실시간 구독이 정리되었습니다.');
-      };
-    } catch (err) {
-      console.error('실시간 구독 설정 중 오류:', err);
-      setIsSubscribed(false);
-    }
+    console.log('폴링 방식으로 변경되어 실시간 구독이 사용되지 않습니다.');
+    return () => {}; // 빈 정리 함수
   };
 
   // 게임 참가 처리
@@ -215,8 +121,7 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
       // 최초 참가 시 메시지 불러오기
       fetchMessages();
       
-      // 실시간 구독 설정
-      setupSubscriptions(newPlayerId);
+      // 이제 setupSubscriptions는 호출하지 않음 (폴링 방식 사용)
     } catch (err) {
       console.error('게임 참가 오류:', err);
       setError('게임 참가 중 오류가 발생했습니다.');
