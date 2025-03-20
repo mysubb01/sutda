@@ -1,5 +1,5 @@
 {
-  "name": "korean-style-poker-ts",
+  "name": "sutda",
   "version": "1.0.0",
   "description": "한국식 포커 게임 섯다 - TypeScript & Supabase 버전",
   "main": "index.js",

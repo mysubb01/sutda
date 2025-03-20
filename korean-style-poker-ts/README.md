@@ -12,8 +12,8 @@
 1. 프로젝트 클론 및 의존성 설치
 
 ```bash
-git clone https://github.com/yourusername/korean-style-poker-ts.git
-cd korean-style-poker-ts
+git clone https://github.com/yourusername/sutda.git
+cd sutda
 npm install
 ```
 
