@@ -74,10 +74,13 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
   
   // 실시간 구독 설정
   const setupSubscriptions = (pid: string) => {
-    console.log('실시간 구독 설정 시작...');
+    console.log('실시간 구독 설정 시작...', pid);
     
     // 중복 구독 방지
-    if (isSubscribed) return;
+    if (isSubscribed) {
+      console.log('이미 구독 중입니다. 중복 구독 방지.');
+      return;
+    }
     
     try {
       // 게임 상태 변경 구독
@@ -128,34 +131,67 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
           table: 'messages',
           filter: `game_id=eq.${gameId}`
         }, (payload) => {
-          console.log('새 메시지 감지:', payload);
-          // 내가 보낸 메시지가 아닌 경우에만 추가 (중복 방지)
-          if (payload.new.player_id !== pid) {
-            setMessages(prev => [...prev, payload.new as Message]);
-          }
+          console.log('새 메시지 감지:', payload.new);
+          // 메시지 추가 (중복 방지 로직 제거 - user_id로 구분하기 때문에 중복 발생 가능성 낮음)
+          const newMessage = payload.new as Message;
+          setMessages(prev => {
+            // 이미 같은 ID의 메시지가 있는지 확인하여 중복 방지
+            if (prev.some(msg => msg.id === newMessage.id)) {
+              return prev;
+            }
+            return [...prev, newMessage];
+          });
         });
       
-      // 채널 구독 시작
-      Promise.all([
-        gameChannel.subscribe((status) => console.log(`게임 채널 상태: ${status}`)),
-        playersChannel.subscribe((status) => console.log(`플레이어 채널 상태: ${status}`)),
-        actionsChannel.subscribe((status) => console.log(`액션 채널 상태: ${status}`)),
-        messagesChannel.subscribe((status) => console.log(`메시지 채널 상태: ${status}`))
-      ]);
+      // 채널 구독 시작 및 상태 모니터링
+      gameChannel.subscribe((status) => {
+        console.log(`게임 채널 상태: ${status}`);
+        if (status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') {
+          console.log('게임 채널 재연결 시도...');
+          gameChannel.subscribe();
+        }
+      });
+      
+      playersChannel.subscribe((status) => {
+        console.log(`플레이어 채널 상태: ${status}`);
+        if (status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') {
+          console.log('플레이어 채널 재연결 시도...');
+          playersChannel.subscribe();
+        }
+      });
+      
+      actionsChannel.subscribe((status) => {
+        console.log(`액션 채널 상태: ${status}`);
+        if (status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') {
+          console.log('액션 채널 재연결 시도...');
+          actionsChannel.subscribe();
+        }
+      });
+      
+      messagesChannel.subscribe((status) => {
+        console.log(`메시지 채널 상태: ${status}`);
+        if (status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') {
+          console.log('메시지 채널 재연결 시도...');
+          messagesChannel.subscribe();
+        }
+      });
       
       setIsSubscribed(true);
       console.log('모든 실시간 구독이 설정되었습니다.');
       
       // 컴포넌트 언마운트 시 구독 정리
       return () => {
+        console.log('구독 정리 시작...');
         supabase.removeChannel(gameChannel);
         supabase.removeChannel(playersChannel);
         supabase.removeChannel(actionsChannel);
         supabase.removeChannel(messagesChannel);
+        setIsSubscribed(false);
         console.log('실시간 구독이 정리되었습니다.');
       };
     } catch (err) {
       console.error('실시간 구독 설정 중 오류:', err);
+      setIsSubscribed(false);
     }
   };
 
