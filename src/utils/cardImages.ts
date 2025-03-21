@@ -70,7 +70,7 @@ const cardTextDescriptions: Record<number, string> = {
 export function getCardImagePath(cardNumber: number): string {
   const month = Math.ceil(cardNumber / 2);
   const isKwang = cardNumber % 2 === 1;
-  return `/images/cards/${month}_${isKwang ? 'kwang' : 'yeol'}.png`;
+  return `/images/cards/${month}_${isKwang ? 'kwang' : 'yeol'}.jpg`;
 }
 
 /**
@@ -119,17 +119,17 @@ export function preloadCardImages(): void {
   preloadBackImage.src = cardBackImagePath;
   
   const preloadFallbackImage = new Image();
-  preloadFallbackImage.src = '/images/cards/unknown.png';
+  preloadFallbackImage.src = '/images/cards/unknown.jpg';
   
   // 모든 카드 이미지 프리로드 (1월~10월, 광/열끗)
   for (let month = 1; month <= 10; month++) {
     // 광 카드
     const kwangImage = new Image();
-    kwangImage.src = `/images/cards/${month}_kwang.png`;
+    kwangImage.src = `/images/cards/${month}_kwang.jpg`;
     
     // 열끗 카드
     const yeolImage = new Image();
-    yeolImage.src = `/images/cards/${month}_yeol.png`;
+    yeolImage.src = `/images/cards/${month}_yeol.jpg`;
   }
   
   console.log('카드 이미지 프리로딩 완료');

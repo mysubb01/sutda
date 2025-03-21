@@ -35,25 +35,25 @@ export function TablePlayer({
   const getCardImageUrl = (status: CardStatus, value?: string) => {
     try {
       if (status === 'hidden') {
-        return '/images/cards/cardback.png'; // 숨김 상태용 이미지
+        return '/images/cards/CardBack.png'; // 숨김 상태용 이미지
       } else if (status === 'showing') {
-        return '/images/cards/cardback.png'; // 뒷면 카드 이미지
+        return '/images/cards/CardBack.png'; // 뒷면 카드 이미지
       } else if (status === 'open' && value) {
         // 실제 존재하는 카드 이미지 반환
         return `/images/cards/${value}.jpg`;
       } else {
         // 기본 카드 이미지 (오류 방지)
-        return '/images/cards/cardback.png';
+        return '/images/cards/CardBack.png';
       }
     } catch (error) {
       console.error('카드 이미지 URL 생성 오류:', error);
-      return '/images/cards/cardback.png'; // 오류 시 기본 카드 이미지
+      return '/images/cards/CardBack.png'; // 오류 시 기본 카드 이미지
     }
   };
 
   // 카드 이미지 로드 오류시 대체 이미지 처리
   const handleImageError = (e: React.SyntheticEvent<HTMLImageElement>) => {
-    e.currentTarget.src = '/images/cards/cardback.png';
+    e.currentTarget.src = '/images/cards/CardBack.png';
     console.log('카드 이미지 로드 실패, 대체 이미지 사용');
   };
 
