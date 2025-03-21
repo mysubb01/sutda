@@ -109,7 +109,8 @@ export async function joinRoom(
         user_id: userId,
         username,
         balance: newBalance,
-        seat_index: seatIndex
+        seat_index: seatIndex,
+        game_id: null  // NULL 제약 조건 오류를 피하기 위해 임시 값 설정
       })
       .select();
 
