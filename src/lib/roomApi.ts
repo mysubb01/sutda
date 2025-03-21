@@ -39,6 +39,7 @@ export async function createRoom(
   const roomId = uuidv4();
 
   try {
+    // 방 생성
     const { data, error } = await supabase
       .from('rooms')
       .insert({
@@ -55,8 +56,61 @@ export async function createRoom(
       console.error('방 생성 오류:', error);
       throw new Error('방을 생성할 수 없습니다: ' + error.message);
     }
+    
+    // 방과 동일한 ID로 게임 생성
+    const { error: gameError } = await supabase
+      .from('games')
+      .insert({
+        id: roomId,  // 방 ID와 동일한 ID 사용
+        room_id: roomId,
+        status: 'waiting',
+        betting_value: 0,
+        base_bet: 1000,
+        total_pot: 0,
+        room_name: name // 방 이름도 저장
+      });
 
-    console.log('방 생성 성공:', roomId);
+    if (gameError) {
+      console.error('게임 생성 오류:', gameError);
+      throw new Error('게임을 생성할 수 없습니다: ' + gameError.message);
+    }
+    
+    // 방장 플레이어 생성 (임시 사용자명 사용)
+    const userId = `user_${Math.random().toString(36).substring(2, 9)}`;
+    const playerId = uuidv4();
+    const username = '방장'; // 기본 사용자명
+    
+    // 임시 사용자 잔액 설정 (실제 구현에서는 인증 시스템 사용)
+    const userBalance = 100000;
+    const newBalance = userBalance - entry_fee;
+    
+    // 방장 플레이어 정보 추가
+    const { error: playerError } = await supabase
+      .from('players')
+      .insert({
+        id: playerId,
+        room_id: roomId,
+        game_id: roomId,
+        user_id: userId,
+        username,
+        balance: newBalance,
+        seat_index: 0, // 방장은 0번 자리에 배치
+        is_ready: true // 방장은 항상 준비됨
+      });
+      
+    if (playerError) {
+      console.error('방장 플레이어 생성 오류:', playerError);
+      throw new Error('방장 플레이어를 생성할 수 없습니다: ' + playerError.message);
+    }
+    
+    // 브라우저에서 실행 중인 경우에만 localStorage 사용
+    if (typeof window !== 'undefined') {
+      // 로컬 스토리지에 방장 정보 저장
+      localStorage.setItem(`game_${roomId}_player_id`, playerId);
+      localStorage.setItem(`game_${roomId}_username`, username);
+    }
+
+    console.log('방 및 게임 생성 성공:', roomId);
     return { roomId };
   } catch (err) {
     console.error('방 생성 중 예외 발생:', err);
@@ -101,34 +155,32 @@ export async function joinRoom(
     const newBalance = userBalance - roomData.entry_fee;
 
     // 플레이어 생성 - 아직 게임 참여는 아님 (방에만 입장)
-    const { data: playerData, error: playerError } = await supabase
+    const { error: playerError } = await supabase
       .from('players')
       .insert({
         id: playerId,
         room_id: roomId,
+        game_id: roomId, // 방 ID와 동일한 ID 사용
         user_id: userId,
-        username,
+        username: username,
         balance: newBalance,
-        seat_index: seatIndex,
-        game_id: null  // NULL 제약 조건 오류를 피하기 위해 임시 값 설정
-      })
-      .select();
+        seat_index: seatIndex !== undefined ? seatIndex : null,
+        is_ready: false // 준비 상태 기본값 false
+      });
 
     if (playerError) {
       console.error('플레이어 생성 오류:', playerError);
       throw new Error('방에 입장할 수 없습니다: ' + playerError.message);
     }
 
-    // 로컬 스토리지에 사용자 정보 저장
-    localStorage.setItem(`room_${roomId}_user_id`, userId);
-    localStorage.setItem(`room_${roomId}_player_id`, playerId);
+    // 브라우저에서 실행 중인 경우에만 localStorage 사용
+    if (typeof window !== 'undefined') {
+      // 로컬 스토리지에 사용자 정보 저장 (게임 페이지에서 사용)
+      localStorage.setItem(`game_${roomId}_player_id`, playerId);
+      localStorage.setItem(`game_${roomId}_username`, username);
+    }
 
-    return {
-      roomId,
-      playerId,
-      balance: newBalance,
-      entry_fee: roomData.entry_fee
-    };
+    return { playerId, roomId };
   } catch (err) {
     console.error('방 입장 중 예외 발생:', err);
     throw err;

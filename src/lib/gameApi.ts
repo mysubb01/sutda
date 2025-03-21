@@ -1588,3 +1588,94 @@ export async function betAction(
     throw error;
   }
 }
+
+/**
+ * 게임 방장 여부 확인
+ */
+export async function isRoomOwner(gameId: string, playerId: string): Promise<boolean> {
+  try {
+    const { data, error } = await supabase
+      .from('players')
+      .select('seat_index')
+      .eq('game_id', gameId)
+      .eq('id', playerId)
+      .single();
+
+    if (error) {
+      throw handleDatabaseError(error, 'isRoomOwner');
+    }
+
+    return data.seat_index === 0; // seat_index가 0인 플레이어가 방장
+  } catch (error) {
+    console.error('방장 확인 오류:', error);
+    return false;
+  }
+}
+
+/**
+ * 게임 시작 가능 여부 확인
+ */
+export async function canStartGame(gameId: string): Promise<{ canStart: boolean; message: string }> {
+  try {
+    // 게임 상태 확인
+    const { data: gameData, error: gameError } = await supabase
+      .from('games')
+      .select('status')
+      .eq('id', gameId)
+      .single();
+
+    if (gameError || !gameData) {
+      throw handleResourceNotFoundError('game', gameId, gameError);
+    }
+
+    if (gameData.status !== 'waiting') {
+      return { canStart: false, message: '이미 게임이 진행 중입니다.' };
+    }
+
+    // 플레이어 수 확인
+    const { data: playersData, error: playersError } = await supabase
+      .from('players')
+      .select('id, is_ready')
+      .eq('game_id', gameId)
+      .not('seat_index', 'is', null);
+
+    if (playersError) {
+      throw handleDatabaseError(playersError, 'canStartGame-players');
+    }
+
+    if (!playersData || playersData.length < 2) {
+      return { canStart: false, message: '게임을 시작하려면 최소 2명의 플레이어가 필요합니다.' };
+    }
+
+    // 모든 플레이어가 준비 상태인지 확인
+    const notReadyPlayers = playersData.filter(p => !p.is_ready);
+    if (notReadyPlayers.length > 0) {
+      return { canStart: false, message: '모든 플레이어가 준비를 완료해야 게임을 시작할 수 있습니다.' };
+    }
+
+    return { canStart: true, message: '게임을 시작할 수 있습니다.' };
+  } catch (error) {
+    console.error('게임 시작 가능 여부 확인 오류:', error);
+    return { canStart: false, message: '게임 상태를 확인할 수 없습니다.' };
+  }
+}
+
+/**
+ * 플레이어 준비 상태 토글
+ */
+export async function toggleReady(gameId: string, playerId: string, isReady: boolean): Promise<void> {
+  try {
+    const { error } = await supabase
+      .from('players')
+      .update({ is_ready: isReady })
+      .eq('id', playerId)
+      .eq('game_id', gameId);
+
+    if (error) {
+      throw handleDatabaseError(error, 'toggleReady');
+    }
+  } catch (error) {
+    console.error('준비 상태 변경 오류:', error);
+    throw handleGameError(error, ErrorType.DB_ERROR, '준비 상태 변경 중 오류');
+  }
+}

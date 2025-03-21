@@ -89,7 +89,7 @@ export default function RoomPage({ params }: RoomPageProps) {
       
       toast.success('방에 입장했습니다!');
       // 게임 페이지로 이동 - 현재는 방 ID와 플레이어 ID를 함께 전달
-      router.push(`/room/${roomId}/player/${playerId}`);
+      router.push(`/game/${roomId}`);
     } catch (err: any) {
       console.error('방 입장 오류:', err);
       setError(err.message || '방에 입장하는 도중 오류가 발생했습니다.');

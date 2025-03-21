@@ -38,7 +38,7 @@ export default function CreateRoomPage() {
       );
       
       toast.success('방이 생성되었습니다!');
-      router.push(`/room/${roomId}`);
+      router.push(`/game/${roomId}`);
     } catch (err) {
       console.error('방 생성 오류:', err);
       setError('방을 생성하는 도중 오류가 발생했습니다.');

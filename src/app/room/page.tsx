@@ -79,7 +79,7 @@ export default function RoomListPage() {
   };
 
   const handleJoinRoom = (roomId: string) => {
-    router.push(`/room/${roomId}`);
+    router.push(`/game/${roomId}`);
   };
 
   return (

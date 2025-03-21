@@ -9,7 +9,7 @@ import { GameControls } from './GameControls';
 import { Chat } from './Chat';
 import { GameResult } from './GameResult';
 import { toast } from 'react-hot-toast';
-import { startGame, updateSeat, joinGame } from '@/lib/gameApi';
+import { startGame, updateSeat, joinGame, toggleReady } from '@/lib/gameApi';
 
 interface GameTableProps {
   gameState: GameState;
@@ -19,6 +19,12 @@ interface GameTableProps {
   isObserver?: boolean;
   onPlayerJoined?: (newPlayerId: string, newUsername: string) => void;
   onSeatChange?: (seatIndex: number) => Promise<void>;
+  isHost?: boolean;
+  isReady?: boolean;
+  onToggleReady?: () => Promise<void>;
+  onStartGame?: () => Promise<void>;
+  isStartingGame?: boolean;
+  canStartGame?: {canStart: boolean, message: string};
 }
 
 export function GameTable({ 
@@ -28,12 +34,22 @@ export function GameTable({
   fetchGameState,
   isObserver = false,
   onPlayerJoined,
-  onSeatChange
+  onSeatChange,
+  isHost = false,
+  isReady = false,
+  onToggleReady,
+  onStartGame,
+  isStartingGame = false,
+  canStartGame = {canStart: false, message: ''}
 }: GameTableProps) {
   const [showCards, setShowCards] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
   const [joinSlot, setJoinSlot] = useState<number | null>(null);
-  
+  const [username, setUsername] = useState('');
+  const [showNicknameModal, setShowNicknameModal] = useState(false);
+  const [selectedSeat, setSelectedSeat] = useState<number | null>(null);
+  const [isJoining, setIsJoining] = useState(false);
+
   // 게임이 시작되었는지 여부를 체크
   useEffect(() => {
     if (gameState?.status === 'playing' && !hasStarted) {
@@ -72,7 +88,7 @@ export function GameTable({
   
   // 게임에 참여한 플레이어 수
   const playerCount = gameState.players.length;
-  const maxPlayers = 8; // 최대 8명까지 참가 가능
+  const maxPlayers = 5; // 최대 5명까지 참가 가능
   
   // 카드 변환 함수 - 카드 ID를 카드 정보로 변환
   const mapCards = (playerCards?: number[], isVisible = false) => {
@@ -101,8 +117,8 @@ export function GameTable({
     // 좌석 인덱스가 있으면 해당 위치에 표시
     let position = 0;
     
-    if (player.seat_index !== undefined && player.seat_index >= 0 && player.seat_index < 8) {
-      // 좌석 인덱스를 직접 사용 (0-7)
+    if (player.seat_index !== undefined && player.seat_index >= 0 && player.seat_index < 5) {
+      // 좌석 인덱스를 직접 사용 (0-4)
       position = player.seat_index;
     } else {
       // 좌석 인덱스가 없는 경우, 현재 플레이어를 기준으로 상대적 위치 계산
@@ -140,8 +156,10 @@ export function GameTable({
   // 디버깅용 로그
   console.log('GameTable 정보:', {
     플레이어수: playerCount,
-    플레이어정보: gameState.players.map(p => ({ id: p.id, name: p.username, seat: p.seat_index })),
-    빈자리: emptySlots
+    플레이어정보: gameState.players.map(p => ({ id: p.id, name: p.username, seat: p.seat_index, ready: p.is_ready })),
+    빈자리: emptySlots,
+    방장여부: isHost,
+    준비상태: isReady
   });
 
   // 게임 재시작 함수
@@ -170,47 +188,46 @@ export function GameTable({
 
   // 빈 자리 클릭 핸들러
   const handleSeatClick = async (seatIndex: number) => {
+    if (!seatIndex && seatIndex !== 0) {
+      console.error('유효하지 않은 자리 번호:', seatIndex);
+      return;
+    }
+    
+    // 닉네임 입력 모달 표시
+    setSelectedSeat(seatIndex);
+    setShowNicknameModal(true);
+  };
+
+  // 닉네임 입력 후 참가하기
+  const handleJoinWithNickname = async () => {
+    if (!selectedSeat && selectedSeat !== 0) return;
+    if (!username.trim()) {
+      toast.error('닉네임을 입력해주세요.');
+      return;
+    }
+    
     try {
-      if (!seatIndex && seatIndex !== 0) {
-        console.error('유효하지 않은 자리 번호:', seatIndex);
-        return;
+      setIsJoining(true);
+      console.log(`참가 시도: 좌석 ${selectedSeat}, 닉네임 ${username}`);
+      const { playerId } = await joinGame(gameId, username, selectedSeat);
+      
+      // 플레이어 ID 저장
+      localStorage.setItem(`game_${gameId}_player_id`, playerId);
+      localStorage.setItem(`game_${gameId}_username`, username);
+      
+      // 부모 컴포넌트에 참가 알림
+      if (onPlayerJoined) {
+        onPlayerJoined(playerId, username);
       }
       
-      if (isObserver) {
-        // 관찰자가 빈 자리 클릭 시 -> 플레이어로 참가
-        const playerName = `게스트${Math.floor(Math.random() * 1000)}`;
-        
-        console.log(`참가 시도: 좌석 ${seatIndex}, 이름 ${playerName}`);
-        const { playerId } = await joinGame(gameId, playerName, seatIndex);
-        
-        // 플레이어 ID 저장
-        localStorage.setItem(`game_${gameId}_player_id`, playerId);
-        localStorage.setItem(`game_${gameId}_username`, playerName);
-        
-        // 부모 컴포넌트에 참가 알림
-        if (onPlayerJoined) {
-          onPlayerJoined(playerId, playerName);
-        }
-        
-        toast.success('게임에 참가했습니다!');
-      } else {
-        // 이미 참가한 플레이어가 빈 자리 클릭 시 -> 상위 컴포넌트에 위임
-        console.log(`좌석 변경 시도: 좌석 ${seatIndex}`);
-        
-        // 부모 컴포넌트에서 처리
-        if (onSeatChange) {
-          await onSeatChange(seatIndex);
-        } else {
-          // 기존 방식 (폴백)
-          await updateSeat(gameId, currentPlayerId, seatIndex);
-          toast.success('좌석이 변경되었습니다.');
-          // 게임 상태 새로고침
-          fetchGameState();
-        }
-      }
-    } catch (err) {
-      console.error('참가/좌석 변경 오류:', err);
-      toast.error('좌석을 변경할 수 없습니다.');
+      toast.success('게임에 참가했습니다!');
+      setShowNicknameModal(false);
+      fetchGameState(); // 게임 상태 새로고침
+    } catch (error) {
+      console.error('참가 오류:', error);
+      toast.error('게임에 참가할 수 없습니다.');
+    } finally {
+      setIsJoining(false);
     }
   };
 
@@ -327,6 +344,101 @@ export function GameTable({
           )}
         </div>
         
+        {/* 게임 정보 (상단) */}
+        <div className="relative z-10 flex justify-between items-center px-4 py-2 bg-gray-900 bg-opacity-70 border-b border-gray-700">
+          <div className="text-yellow-300 font-bold text-lg">
+            {gameState.room_name || '섯다 게임'}
+            <span className="ml-2 text-xs text-gray-400">
+              {gameState.status === 'waiting' ? '대기 중' : 
+               gameState.status === 'playing' ? '게임 중' : '게임 종료'}
+            </span>
+          </div>
+
+          <div className="flex space-x-4">
+            {/* 게임이 대기 중일 때만 표시할 준비/시작 버튼 */}
+            {gameState.status === 'waiting' && !isObserver && (
+              <div className="flex space-x-2">
+                {/* 방장이 아닌 경우 준비 버튼 표시 */}
+                {!isHost && onToggleReady && (
+                  <button 
+                    onClick={onToggleReady}
+                    disabled={!onToggleReady}
+                    className={`px-3 py-1 rounded text-sm font-bold transition-colors ${isReady 
+                      ? 'bg-red-600 hover:bg-red-700' 
+                      : 'bg-green-600 hover:bg-green-700'}`}
+                  >
+                    {isReady ? '준비 취소' : '준비 완료'}
+                  </button>
+                )}
+                
+                {/* 방장인 경우 게임 시작 버튼 표시 */}
+                {isHost && onStartGame && (
+                  <button 
+                    onClick={onStartGame}
+                    disabled={!canStartGame.canStart || isStartingGame}
+                    className={`px-3 py-1 rounded text-sm font-bold transition-colors ${
+                      canStartGame.canStart 
+                        ? 'bg-yellow-600 hover:bg-yellow-700' 
+                        : 'bg-gray-600 cursor-not-allowed'}`}
+                    title={!canStartGame.canStart ? canStartGame.message : '게임 시작하기'}
+                  >
+                    {isStartingGame ? '시작 중...' : '게임 시작'}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* 현재 플레이어 잔액 표시 */}
+            <div className="bg-gray-800 px-3 py-1 rounded text-sm">
+              <span className="text-gray-400">잔액: </span>
+              <span className="text-yellow-300 font-bold">
+                {currentPlayer?.balance?.toLocaleString() || 0}원
+              </span>
+            </div>
+          </div>
+        </div>
+        
+        {/* 닉네임 입력 모달 */}
+        {showNicknameModal && (
+          <div className="fixed top-0 left-0 w-full h-full bg-black bg-opacity-70 flex items-center justify-center z-50">
+            <div className="bg-gray-900 p-6 rounded-lg border-2 border-yellow-500 text-white shadow-lg max-w-md w-full">
+              <h2 className="text-xl font-bold text-yellow-400 mb-4">닉네임 입력</h2>
+              <p className="mb-4 text-gray-300">닉네임을 입력하여 게임에 참가하세요.</p>
+              
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-300 mb-1">닉네임</label>
+                <input 
+                  type="text" 
+                  value={username} 
+                  onChange={(e) => setUsername(e.target.value)} 
+                  placeholder="닉네임을 입력하세요"
+                  className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700 focus:border-yellow-500 focus:outline-none"
+                  autoFocus
+                />
+              </div>
+              
+              <div className="flex justify-end space-x-3">
+                <button 
+                  onClick={() => setShowNicknameModal(false)} 
+                  className="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-white font-medium"
+                >
+                  취소
+                </button>
+                <button 
+                  onClick={handleJoinWithNickname} 
+                  disabled={isJoining || !username.trim()}
+                  className={`px-4 py-2 rounded font-medium ${
+                    isJoining || !username.trim()
+                      ? 'bg-gray-600 cursor-not-allowed text-gray-400' 
+                      : 'bg-yellow-600 hover:bg-yellow-700 text-white'}`}
+                >
+                  {isJoining ? '참가 중...' : '참가하기'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        
         {/* ... existing code ... */}
       </div>
     </div>
@@ -335,8 +447,8 @@ export function GameTable({
 
 // 빈 자리 위치 스타일 계산 함수
 function getEmptySlotStyles(position: number): string {
-  // 8개 위치에 맞게 스타일 설정 (원형 테이블 기준)
-  switch (position % 8) {
+  // 5개 위치에 맞게 스타일 설정 (원형 테이블 기준)
+  switch (position % 5) {
     case 0: // 하단 중앙
       return 'bottom-6 left-1/2 -translate-x-1/2';
     case 1: // 하단 우측
@@ -347,12 +459,6 @@ function getEmptySlotStyles(position: number): string {
       return 'top-16 right-20 lg:right-28';
     case 4: // 상단 중앙
       return 'top-6 left-1/2 -translate-x-1/2';
-    case 5: // 상단 좌측
-      return 'top-16 left-20 lg:left-28';
-    case 6: // 좌측
-      return 'left-6 top-1/2 -translate-y-1/2';
-    case 7: // 하단 좌측
-      return 'bottom-16 left-20 lg:left-28';
     default:
       return 'bottom-6 left-1/2 -translate-x-1/2';
   }

@@ -10,7 +10,7 @@ declare global {
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { GameState, Message } from '@/types/game';
-import { getGameState, joinGame, updateSeat } from '@/lib/gameApi';
+import { getGameState, joinGame, updateSeat, isRoomOwner, canStartGame, startGame, toggleReady } from '@/lib/gameApi';
 import { GameTable } from '@/components/GameTable';
 import { GameControls } from '@/components/GameControls';
 import { Chat } from '@/components/Chat';
@@ -36,7 +36,12 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
   const [reconnected, setReconnected] = useState(false);
   const [isObserver, setIsObserver] = useState(true); // 처음에는 관찰자 모드로 시작
   const [isSeatChanging, setIsSeatChanging] = useState(false); // 좌석 변경 중 상태
-  
+  const [isHost, setIsHost] = useState(false); // 방장 여부
+  const [isReady, setIsReady] = useState(false); // 준비 상태
+  const [isTogglingReady, setIsTogglingReady] = useState(false); // 준비 상태 변경 중
+  const [isStartingGame, setIsStartingGame] = useState(false); // 게임 시작 중
+  const [canStart, setCanStart] = useState<{canStart: boolean, message: string}>({canStart: false, message: ''});
+
   // 메시지 불러오기
   const fetchMessages = async () => {
     try {
@@ -62,6 +67,26 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
       const data = await getGameState(gameId);
       console.log('게임 상태 업데이트:', data);
       setGameState(data);
+      
+      // 플레이어 정보가 있는 경우
+      if (playerId) {
+        // 방장 여부 확인
+        const hostStatus = await isRoomOwner(gameId, playerId);
+        setIsHost(hostStatus);
+        
+        // 준비 상태 확인
+        const player = data.players.find(p => p.id === playerId);
+        if (player) {
+          setIsReady(player.is_ready || false);
+        }
+        
+        // 게임 시작 가능 여부 확인 (방장인 경우만)
+        if (hostStatus) {
+          const startStatus = await canStartGame(gameId);
+          setCanStart(startStatus);
+        }
+      }
+      
       return data;
     } catch (err) {
       console.error('게임 상태 불러오기 실패:', err);
@@ -224,6 +249,49 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
     fetchGameState();
   };
   
+  // 준비 상태 토글 처리
+  const handleToggleReady = async () => {
+    if (!playerId || isHost) return; // 방장은 준비상태 불필요
+    
+    try {
+      setIsTogglingReady(true);
+      await toggleReady(gameId, playerId, !isReady);
+      setIsReady(!isReady);
+      toast.success(isReady ? '준비 취소되었습니다.' : '준비 완료!');
+    } catch (err) {
+      console.error('준비 상태 변경 오류:', err);
+      toast.error('준비 상태를 변경하는 중 오류가 발생했습니다.');
+    } finally {
+      setIsTogglingReady(false);
+    }
+  };
+  
+  // 게임 시작 처리 (방장만 가능)
+  const handleStartGame = async () => {
+    if (!playerId || !isHost) return;
+    
+    try {
+      // 시작 가능 여부 다시 확인
+      const startStatus = await canStartGame(gameId);
+      if (!startStatus.canStart) {
+        toast.error(startStatus.message);
+        return;
+      }
+      
+      setIsStartingGame(true);
+      await startGame(gameId);
+      toast.success('게임이 시작됩니다!');
+      
+      // 게임 상태 갱신
+      await fetchGameState();
+    } catch (err) {
+      console.error('게임 시작 오류:', err);
+      toast.error('게임을 시작하는 중 오류가 발생했습니다.');
+    } finally {
+      setIsStartingGame(false);
+    }
+  };
+  
   // 게임 상태와 현재 플레이어 정보 추출
   const isWaiting = gameState?.status === 'waiting';
   const isPlaying = gameState?.status === 'playing'; 
@@ -342,6 +410,12 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
       />
       
       <div className="container mx-auto p-4 relative z-10">
+        {error && (
+          <div className="bg-red-600 text-white p-4 mb-4 rounded-md">
+            {error}
+          </div>
+        )}
+
         <div className="flex flex-col md:flex-row gap-6 h-[calc(100vh-2rem)]">
           {/* 게임 테이블 영역 */}
           <div className="flex-grow rounded-xl overflow-hidden shadow-2xl bg-gray-900 bg-opacity-50 border border-gray-800 relative">
@@ -353,10 +427,16 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
               isObserver={isObserver}
               onPlayerJoined={handleObserverToPlayer}
               onSeatChange={handleSeatChange}
+              isHost={isHost}
+              isReady={isReady}
+              onToggleReady={handleToggleReady}
+              onStartGame={handleStartGame}
+              isStartingGame={isStartingGame}
+              canStartGame={canStart}
             />
             
             {/* 게임 컨트롤 (오른쪽 아래에 위치) */}
-            {gameState.status === 'playing' && playerId && (
+            {gameState?.status === 'playing' && playerId && (
               <div className="absolute bottom-4 right-4 md:bottom-6 md:right-6 w-full max-w-xs md:max-w-sm z-20">
                 <GameControls 
                   gameState={gameState} 
@@ -370,7 +450,7 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
           {/* 우측 정보 패널 */}
           <div className="w-full md:w-80 lg:w-96 flex flex-col space-y-4">
             {/* 게임 컨트롤 (대기 및 종료 상태용) */}
-            {gameState.status !== 'playing' && playerId && (
+            {gameState?.status !== 'playing' && playerId && (
               <div className="h-auto">
                 <GameControls 
                   gameState={gameState} 
@@ -394,4 +474,4 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
       </div>
     </div>
   );
-} 
+}

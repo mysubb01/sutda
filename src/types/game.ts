@@ -80,6 +80,7 @@ export type BetActionType = 'check' | 'call' | 'half' | 'bet' | 'raise' | 'die' 
 export interface GameState {
   id: string;
   room_id?: string; // 속한 방 ID 추가
+  room_name?: string; // 방 이름 추가
   status: GameStatus;
   players: Player[];
   currentTurn: string;
@@ -127,8 +128,6 @@ export interface CreateRoomResponse {
 export interface JoinRoomResponse {
   roomId: string;
   playerId: string;
-  balance: number;
-  entry_fee: number;
 }
 
 /**
