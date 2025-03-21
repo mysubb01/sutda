@@ -6,14 +6,14 @@ import { createRoom } from '@/lib/roomApi';
 import { toast } from 'react-hot-toast';
 import { GameMode } from '@/types/game';
 
-const DEFAULT_ENTRY_FEE = 10000;
+const DEFAULT_BASE_BET = 1000;
 const DEFAULT_MAX_PLAYERS = 8;
 
 export default function CreateRoomPage() {
   const router = useRouter();
   const [name, setName] = useState('');
   const [mode, setMode] = useState<GameMode>(2);
-  const [entryFee, setEntryFee] = useState(DEFAULT_ENTRY_FEE);
+  const [baseBet, setBaseBet] = useState(DEFAULT_BASE_BET);
   const [bettingOption, setBettingOption] = useState<'standard' | 'step_by_step'>('standard');
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +33,7 @@ export default function CreateRoomPage() {
       const { roomId } = await createRoom(
         name,
         mode,
-        entryFee,
+        baseBet,
         bettingOption
       );
       
@@ -123,56 +123,49 @@ export default function CreateRoomPage() {
           </div>
           
           <div className="mb-6">
-            <label className="block text-gray-300 mb-2">입장료</label>
+            <label className="block text-gray-300 mb-2">기본 베팅액</label>
             <div className="grid grid-cols-4 gap-2">
               <button
                 type="button"
-                onClick={() => setEntryFee(5000)}
-                className={`py-2 px-2 rounded-md text-center text-sm transition-colors ${entryFee === 5000 ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300'}`}
+                onClick={() => setBaseBet(500)}
+                className={`py-2 px-2 rounded-md text-center text-sm transition-colors ${baseBet === 500 ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300'}`}
+              >
+                500원
+              </button>
+              <button
+                type="button"
+                onClick={() => setBaseBet(1000)}
+                className={`py-2 px-2 rounded-md text-center text-sm transition-colors ${baseBet === 1000 ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300'}`}
+              >
+                1,000원
+              </button>
+              <button
+                type="button"
+                onClick={() => setBaseBet(5000)}
+                className={`py-2 px-2 rounded-md text-center text-sm transition-colors ${baseBet === 5000 ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300'}`}
               >
                 5,000원
               </button>
               <button
                 type="button"
-                onClick={() => setEntryFee(10000)}
-                className={`py-2 px-2 rounded-md text-center text-sm transition-colors ${entryFee === 10000 ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300'}`}
+                onClick={() => setBaseBet(10000)}
+                className={`py-2 px-2 rounded-md text-center text-sm transition-colors ${baseBet === 10000 ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300'}`}
               >
                 10,000원
               </button>
-              <button
-                type="button"
-                onClick={() => setEntryFee(50000)}
-                className={`py-2 px-2 rounded-md text-center text-sm transition-colors ${entryFee === 50000 ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300'}`}
-              >
-                50,000원
-              </button>
-              <button
-                type="button"
-                onClick={() => setEntryFee(100000)}
-                className={`py-2 px-2 rounded-md text-center text-sm transition-colors ${entryFee === 100000 ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300'}`}
-              >
-                100,000원
-              </button>
             </div>
             <p className="mt-2 text-xs text-gray-400">
-              입장료는 게임을 시작할 때 필요한 최소 금액입니다.
+              게임 시작 시 각 플레이어가 지불하는 기본 베팅액입니다.
             </p>
           </div>
           
-          <div className="flex justify-between">
-            <button
-              type="button"
-              onClick={() => router.back()}
-              className="px-4 py-2 bg-gray-700 text-gray-300 rounded-md hover:bg-gray-600 transition-colors"
-            >
-              취소
-            </button>
+          <div className="mt-6">
             <button
               type="submit"
               disabled={isCreating}
-              className="px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 transition-colors disabled:bg-gray-600 disabled:cursor-not-allowed"
+              className="w-full py-2 px-4 bg-yellow-600 hover:bg-yellow-700 text-white rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isCreating ? '생성 중...' : '방 만들기'}
+              {isCreating ? '생성 중...' : '방 생성하기'}
             </button>
           </div>
         </form>

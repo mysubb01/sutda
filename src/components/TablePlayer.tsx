@@ -1,175 +1,212 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import Image from 'next/image';
-import { CardStatus } from '@/types/game';
+import { Card, CardPair } from './Card';
+import { Player, CardStatus } from '@/types/game';
+import { evaluateCards } from '@/utils/gameLogic';
 import { cn } from '@/lib/utils';
 
 interface TablePlayerProps {
-  position: number; // 0부터 시작하는 플레이어 위치
-  username: string;
-  balance: number;
-  isCurrentTurn: boolean;
-  isDead: boolean;
-  isMe: boolean;
-  faceImage?: string; // 플레이어 캐릭터 이미지 경로
-  cards?: {
-    status: CardStatus; // 'hidden' | 'showing' | 'open'
-    value?: string;
-  }[];
+  player: {
+    id: string;
+    user_id: string;
+    username: string;
+    balance: number;
+    position: number;
+    isMe: boolean;
+    isCurrentTurn: boolean;
+    isDead: boolean;
+    cards: { status: CardStatus; value?: string }[];
+    selected_cards?: number[];
+    open_card?: number;
+    is_ready?: boolean;
+  };
+  isReady?: boolean;
+  mode?: 2 | 3; // 게임 모드: 2장 또는 3장 모드
+  bettingRound?: number; // 현재 베팅 라운드 (3장 모드에서 필요)
 }
 
-export function TablePlayer({
-  position,
-  username,
-  balance,
-  isCurrentTurn,
-  isDead,
-  isMe,
-  faceImage = '/images/ui/face1.png', // 기본 이미지 설정
-  cards = []
-}: TablePlayerProps) {
-  // 플레이어 위치에 따른 스타일 계산
-  const positionStyles = getPositionStyles(position);
-  
-  // 카드 상태에 따른 이미지 URL 결정
-  const getCardImageUrl = (status: CardStatus, value?: string) => {
-    try {
-      if (status === 'hidden') {
-        return '/images/cards/CardBack.png'; // 숨김 상태용 이미지
-      } else if (status === 'showing') {
-        return '/images/cards/CardBack.png'; // 뒷면 카드 이미지
-      } else if (status === 'open' && value) {
-        // 실제 존재하는 카드 이미지 반환
-        return `/images/cards/${value}.jpg`;
-      } else {
-        // 기본 카드 이미지 (오류 방지)
-        return '/images/cards/CardBack.png';
-      }
-    } catch (error) {
-      console.error('카드 이미지 URL 생성 오류:', error);
-      return '/images/cards/CardBack.png'; // 오류 시 기본 카드 이미지
-    }
-  };
+export function TablePlayer({ player, isReady, mode = 2, bettingRound = 1 }: TablePlayerProps) {
+  const { username, balance, position, isMe, isCurrentTurn, cards, isDead, selected_cards, open_card } = player;
+  const [cardValues, setCardValues] = useState<number[]>([]);
+  const [combination, setCombination] = useState<{ rank: string; value: number } | null>(null);
 
-  // 카드 이미지 로드 오류시 대체 이미지 처리
-  const handleImageError = (e: React.SyntheticEvent<HTMLImageElement>) => {
-    e.currentTarget.src = '/images/cards/CardBack.png';
-    console.log('카드 이미지 로드 실패, 대체 이미지 사용');
-  };
+  useEffect(() => {
+    if (cards && Array.isArray(cards)) {
+      const values = [];
+      for (const card of cards) {
+        if (card.status === 'open' && card.value && !isNaN(parseInt(card.value))) {
+          values.push(parseInt(card.value));
+        }
+      }
+
+      setCardValues(values);
+
+      if (values.length >= 2 && (isMe || isDead)) {
+        try {
+          const cardsToEvaluate = mode === 3 && selected_cards
+            ? selected_cards.slice(0, 2)
+            : values.slice(0, 2);
+
+          const result = evaluateCards(cardsToEvaluate);
+          setCombination(result);
+        } catch (error) {
+          console.error('족보 계산 오류:', error);
+          setCombination(null);
+        }
+      }
+    }
+  }, [cards, isMe, isDead, mode, selected_cards]);
+
+  const posStyle = getPositionStyles(position);
+
+  const cardsVisible = cards.some(card => card.status === 'open');
+
+  const cardNumbers = cards.map(card => card.value ? parseInt(card.value) : 0);
+
+  const openCard = mode === 3 && bettingRound === 1 && cards && cards.length > 0
+    ? open_card
+    : undefined;
 
   return (
     <div
-      className={cn(
-        'absolute flex flex-col items-center',
-        positionStyles.container,
-        isCurrentTurn && 'animate-pulse'
-      )}
+      className={`absolute ${posStyle.container} transition-all duration-300 w-36`}
+      style={{ zIndex: isCurrentTurn ? 20 : 10 }}
     >
-      {/* 플레이어 상태 표시 */}
-      <div className="relative mb-1">
-        {/* 플레이어 정보 */}
-        <div className={cn(
-          'rounded-lg px-3 py-2 text-center',
-          isMe ? 'bg-blue-600 bg-opacity-90' : 'bg-gray-800 bg-opacity-90',
-          isDead && 'opacity-50',
-          isCurrentTurn ? 'ring-2 ring-green-400' : '',
-          'border-2',
-          isMe ? 'border-blue-500' : 'border-yellow-500',
-        )}>
-          <p className={cn(
-            'font-bold text-base',
-            isMe ? 'text-white' : 'text-yellow-300'
-          )}>
-            {username}
-          </p>
-          <p className="text-base font-medium text-yellow-400">
-            {balance.toLocaleString()}P
-          </p>
-          
-          {isDead && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 rounded-lg">
-              <p className="text-red-500 font-bold text-base">다이</p>
-            </div>
+      {cardsVisible && combination && (
+        <div className="absolute -top-8 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-70 px-2 py-1 rounded text-yellow-400 text-sm font-bold z-20 whitespace-nowrap">
+          {combination.rank}
+        </div>
+      )}
+
+      <div className={`flex flex-col items-center`}>
+        {isCurrentTurn && (
+          <div className="absolute -top-2 -left-2 w-5 h-5 bg-yellow-500 rounded-full animate-pulse flex items-center justify-center">
+            <span className="text-xs font-bold">턴</span>
+          </div>
+        )}
+
+        {isReady !== undefined && (
+          <div className={`absolute -top-2 -right-2 w-5 h-5 rounded-full flex items-center justify-center ${isReady ? 'bg-green-500' : 'bg-gray-500'}`}>
+            <span className="text-xs font-bold">{isReady ? 'R' : '?'}</span>
+          </div>
+        )}
+
+        <div className={`relative rounded-full w-12 h-12 overflow-hidden border-2 ${isCurrentTurn ? 'border-yellow-400 animate-pulse' : 'border-gray-600'} mb-1`}>
+          <Image
+            src={`/images/ui/Mface${(position % 4) + 1}.png`}
+            alt="Player"
+            fill
+            className={`object-cover ${isDead ? 'grayscale opacity-50' : ''}`}
+          />
+        </div>
+
+        <div className="text-center mb-1 w-full">
+          <p className={`font-bold truncate ${isMe ? 'text-blue-400' : 'text-white'}`}>{username}</p>
+          <p className="text-xs text-yellow-300">{balance.toLocaleString()} P</p>
+        </div>
+
+        <div className={`flex ${posStyle.cards} transition-all duration-300`}>
+          {mode === 2 && (
+            cardNumbers.length > 0 ? (
+              <div className="flex space-x-1">
+                {cardNumbers.map((cardNum, idx) => (
+                  <Card
+                    key={idx}
+                    card={cardNum}
+                    isHidden={!cardsVisible && !isMe}
+                    width={65}
+                    height={95}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="w-[130px] h-[95px] bg-gray-800 bg-opacity-30 rounded-md border border-gray-700" />
+            )
+          )}
+
+          {mode === 3 && (
+            cardNumbers.length > 0 ? (
+              <div className="flex space-x-1">
+                {cardNumbers.map((cardNum, idx) => {
+                  const isOpen = bettingRound === 1 && idx === 0 && openCard === cardNum;
+                  return (
+                    <Card
+                      key={idx}
+                      card={cardNum}
+                      isHidden={!cardsVisible && !isMe && !isOpen}
+                      width={55}
+                      height={80}
+                    />
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="w-[165px] h-[80px] bg-gray-800 bg-opacity-30 rounded-md border border-gray-700" />
+            )
           )}
         </div>
-      </div>
-      
-      {/* 카드 영역 */}
-      <div className={cn(
-        'flex space-x-2',
-        positionStyles.cards
-      )}>
-        {cards.map((card, idx) => (
-          <div
-            key={idx}
-            className={cn(
-              'relative w-24 h-32 transition-all',
-              card.status === 'hidden' && 'opacity-50 scale-95'
-            )}
-          >
-            <Image
-              src={getCardImageUrl(card.status, card.value)}
-              alt={card.status}
-              width={96}
-              height={130}
-              className="rounded-md shadow-lg"
-              onError={handleImageError}
-            />
+
+        {isDead && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-40 rounded-md">
+            <div className="bg-red-900 px-3 py-1 rounded-md text-white font-bold">
+              DIE
+            </div>
           </div>
-        ))}
+        )}
       </div>
     </div>
   );
 }
 
-// 플레이어 위치에 따른 스타일 계산 함수
 function getPositionStyles(position: number): { container: string; cards: string } {
-  // 8개 위치에 맞게 스타일 설정 (원형 테이블 기준)
+  // 8uac1c uc704uce58uc5d0 ub9deuac8c uc2a4ud0c0uc77c uc124uc815 (uc6d0ud615 ud14cuc774ube14 uae30uc900)
   switch (position % 8) {
-    case 0: // 하단 중앙
+    case 0: // ud558ub2e8 uc911uc559
       return {
-        container: 'bottom-4 left-1/2 -translate-x-1/2',
-        cards: 'mt-2'
+        container: 'bottom-[5%] left-1/2 -translate-x-1/2',
+        cards: 'mt-4'
       };
-    case 1: // 하단 우측
+    case 1: // uc624ub978ucabd ud558ub2e8
       return {
-        container: 'bottom-12 right-16 lg:right-24',
-        cards: 'mt-2'
+        container: 'bottom-[20%] right-[10%]',
+        cards: 'mt-4'
       };
-    case 2: // 우측
+    case 2: // uc624ub978ucabd
       return {
-        container: 'right-4 top-1/2 -translate-y-1/2',
-        cards: 'ml-2'
+        container: 'right-[5%] top-1/2 -translate-y-1/2',
+        cards: 'ml-4'
       };
-    case 3: // 상단 우측
+    case 3: // uc624ub978ucabd uc0c1ub2e8
       return {
-        container: 'top-12 right-16 lg:right-24',
-        cards: 'mb-2 flex-row-reverse'
+        container: 'top-[20%] right-[10%]',
+        cards: 'mb-4 flex-row-reverse'
       };
-    case 4: // 상단 중앙
+    case 4: // uc0c1ub2e8 uc911uc559
       return {
-        container: 'top-4 left-1/2 -translate-x-1/2',
-        cards: 'mb-2 flex-row-reverse'
+        container: 'top-[5%] left-1/2 -translate-x-1/2',
+        cards: 'mb-4 flex-row-reverse'
       };
-    case 5: // 상단 좌측
+    case 5: // uc67cuc058 uc0c1ub2e8
       return {
-        container: 'top-12 left-16 lg:left-24',
-        cards: 'mb-2 flex-row-reverse'
+        container: 'top-[20%] left-[10%]',
+        cards: 'mb-4 flex-row-reverse'
       };
-    case 6: // 좌측
+    case 6: // uc67cuc058
       return {
-        container: 'left-4 top-1/2 -translate-y-1/2',
-        cards: 'mr-2'
+        container: 'left-[5%] top-1/2 -translate-y-1/2',
+        cards: 'mr-4 flex-row-reverse'
       };
-    case 7: // 하단 좌측
+    case 7: // uc67cuc058 ud558ub2e8
       return {
-        container: 'bottom-12 left-16 lg:left-24',
-        cards: 'mt-2'
+        container: 'bottom-[20%] left-[10%]',
+        cards: 'mt-4 flex-row'
       };
     default:
       return {
-        container: 'bottom-4 left-1/2 -translate-x-1/2',
-        cards: 'mt-2'
+        container: 'bottom-[5%] left-1/2 -translate-x-1/2',
+        cards: 'mt-4'
       };
   }
-} 
+}

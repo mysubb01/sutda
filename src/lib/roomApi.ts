@@ -33,7 +33,7 @@ export async function getAllRooms(): Promise<Room[]> {
 export async function createRoom(
   name: string,
   mode: GameMode,
-  entry_fee: number,
+  entry_fee: number, // 입장료는 0으로 설정, 게임 시작 시에만 입장료가 부과됨
   betting_option: 'standard' | 'step_by_step' = 'standard'
 ): Promise<CreateRoomResponse> {
   const roomId = uuidv4();
@@ -46,7 +46,7 @@ export async function createRoom(
         id: roomId,
         name,
         mode,
-        entry_fee,
+        entry_fee: 0, // 방 생성 시 입장료는 0으로 설정
         betting_option,
         is_active: true
       })
@@ -65,7 +65,7 @@ export async function createRoom(
         room_id: roomId,
         status: 'waiting',
         betting_value: 0,
-        base_bet: 1000,
+        base_bet: entry_fee, // 입장료는 게임 시작 시에만 부과됨
         total_pot: 0,
         room_name: name // 방 이름도 저장
       });
@@ -82,7 +82,6 @@ export async function createRoom(
     
     // 임시 사용자 잔액 설정 (실제 구현에서는 인증 시스템 사용)
     const userBalance = 100000;
-    const newBalance = userBalance - entry_fee;
     
     // 방장 플레이어 정보 추가
     const { error: playerError } = await supabase
@@ -93,7 +92,7 @@ export async function createRoom(
         game_id: roomId,
         user_id: userId,
         username,
-        balance: newBalance,
+        balance: userBalance, // 잔액은 게임 시작 시에만 변경됨
         seat_index: 0, // 방장은 0번 자리에 배치
         is_ready: true // 방장은 항상 준비됨
       });
@@ -139,22 +138,16 @@ export async function joinRoom(
       throw new Error('방을 찾을 수 없습니다.');
     }
 
-    // 사용자 잔액 확인 (실제 구현에서는 인증 시스템과 연동)
+    // 사용자 잔액 설정 (실제 구현에서는 인증 시스템과 연동)
     // 현재는 간단히 10만으로 설정
     const userBalance = 100000;
     
-    if (userBalance < roomData.entry_fee) {
-      throw new Error('잔액이 부족하여 이 방에 입장할 수 없습니다.');
-    }
-
     // 임시 사용자 ID 생성 (실제 구현시 인증 시스템 연동)
     const userId = `user_${Math.random().toString(36).substring(2, 9)}`;
     const playerId = uuidv4();
 
-    // 참가비 차감
-    const newBalance = userBalance - roomData.entry_fee;
-
-    // 플레이어 생성 - 아직 게임 참여는 아님 (방에만 입장)
+    // 방 입장은 무료로 변경
+    // 플레이어 생성 - 방에만 입장 (게임 시작 시 참가비 지불)
     const { error: playerError } = await supabase
       .from('players')
       .insert({
@@ -163,7 +156,7 @@ export async function joinRoom(
         game_id: roomId, // 방 ID와 동일한 ID 사용
         user_id: userId,
         username: username,
-        balance: newBalance,
+        balance: userBalance, // 방 입장은 무료로 변경
         seat_index: seatIndex !== undefined ? seatIndex : null,
         is_ready: false // 준비 상태 기본값 false
       });
@@ -312,16 +305,16 @@ export async function createGameInRoom(roomId: string): Promise<string> {
 
     const gameId = uuidv4();
 
-    // 게임 생성
-    const { error: gameError } = await supabase
+    // 새 게임 생성 (이미 방장은 있음)
+    const { data: gameData, error: gameError } = await supabase
       .from('games')
       .insert({
-        id: gameId,
         room_id: roomId,
         status: 'waiting',
         betting_value: 0,
-        base_bet: 1000,
-        total_pot: 0
+        base_bet: roomData.entry_fee, // 입장료는 게임 시작 시에만 부과됨
+        total_pot: 0,
+        room_name: roomData.name // 방 이름도 저장
       });
 
     if (gameError) {
@@ -398,5 +391,57 @@ export async function checkRoomAccess(roomId: string, playerId: string): Promise
   } catch (err) {
     console.error('방 접근 가능 여부 확인 중 오류 발생:', err);
     return false;
+  }
+}
+
+/**
+ * 플레이어 좌석 변경
+ */
+export async function changeSeat(roomId: string, playerId: string, newSeatIndex: number): Promise<void> {
+  try {
+    // 플레이어 정보 조회
+    const { data: playerData, error: playerError } = await supabase
+      .from('players')
+      .select('*')
+      .eq('id', playerId)
+      .eq('room_id', roomId)
+      .single();
+
+    if (playerError || !playerData) {
+      console.error('플레이어 조회 오류:', playerError);
+      throw new Error('플레이어 정보를 찾을 수 없습니다.');
+    }
+
+    // 요청한 자리가 이미 차지되어 있는지 확인
+    const { data: existingSeat, error: seatError } = await supabase
+      .from('players')
+      .select('id')
+      .eq('room_id', roomId)
+      .eq('seat_index', newSeatIndex);
+
+    if (seatError) {
+      console.error('좌석 확인 오류:', seatError);
+      throw new Error('좌석 정보를 확인할 수 없습니다.');
+    }
+
+    if (existingSeat && existingSeat.length > 0) {
+      throw new Error('이미 다른 플레이어가 해당 자리에 앉아있습니다.');
+    }
+
+    // 자리 변경
+    const { error: updateError } = await supabase
+      .from('players')
+      .update({ seat_index: newSeatIndex })
+      .eq('id', playerId)
+      .eq('room_id', roomId);
+
+    if (updateError) {
+      console.error('자리 변경 오류:', updateError);
+      throw new Error('자리를 변경할 수 없습니다: ' + updateError.message);
+    }
+
+  } catch (err) {
+    console.error('좌석 변경 중 예외 발생:', err);
+    throw err;
   }
 }

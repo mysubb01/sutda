@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Image from 'next/image';
-import { GameState, Player } from '@/types/game';
+import { GameState, Player, CardStatus } from '@/types/game';
 import { TablePlayer } from './TablePlayer';
 import { cn } from '@/lib/utils';
 import { GameControls } from './GameControls';
@@ -10,6 +10,7 @@ import { Chat } from './Chat';
 import { GameResult } from './GameResult';
 import { toast } from 'react-hot-toast';
 import { startGame, updateSeat, joinGame, toggleReady } from '@/lib/gameApi';
+import { BettingTimer } from './BettingTimer';
 
 interface GameTableProps {
   gameState: GameState;
@@ -88,65 +89,76 @@ export function GameTable({
   
   // 게임에 참여한 플레이어 수
   const playerCount = gameState.players.length;
-  const maxPlayers = 5; // 최대 5명까지 참가 가능
-  
-  // 카드 변환 함수 - 카드 ID를 카드 정보로 변환
-  const mapCards = (playerCards?: number[], isVisible = false) => {
-    if (!playerCards || playerCards.length === 0) {
-      return [
-        { status: 'hidden' as const },
-        { status: 'hidden' as const }
-      ];
-    }
-    
-    if (isVisible) {
-      return playerCards.map(card => ({
-        status: 'open' as const,
-        value: String(card) // 카드 ID를 문자열로 변환하여 사용
-      }));
-    } else {
-      return playerCards.map(() => ({
-        status: 'showing' as const
-      }));
-    }
-  };
+  const maxPlayers = 8; // 최대 8명까지 참가 가능
   
   // 플레이어들의 화면 위치 매핑
-  // seat_index가 있는 경우 해당 위치에 표시하고, 없으면 현재 플레이어를 기준으로 상대적 위치 계산
-  const positionedPlayers = gameState.players.map((player) => {
-    // 좌석 인덱스가 있으면 해당 위치에 표시
-    let position = 0;
+  const positionedPlayers = useMemo(() => {
+    if (!gameState || !gameState.players) return [];
     
-    if (player.seat_index !== undefined && player.seat_index >= 0 && player.seat_index < 5) {
-      // 좌석 인덱스를 직접 사용 (0-4)
-      position = player.seat_index;
-    } else {
-      // 좌석 인덱스가 없는 경우, 현재 플레이어를 기준으로 상대적 위치 계산
-      const currentPlayerIndex = gameState.players.findIndex(p => p.id === currentPlayerId);
-      position = (gameState.players.indexOf(player) - currentPlayerIndex) % playerCount;
-      if (position < 0) position += playerCount;
-    }
+    const currentUserId = currentPlayerId;
+    let playersWithPosition = [...gameState.players];
     
-    // 현재 플레이어인지 확인
-    const isMe = player.id === currentPlayerId;
-    
-    // 현재 턴인 플레이어인지 확인
-    const isCurrentTurn = player.id === gameState.currentTurn;
-    
-    // 카드가 보이는지 여부 결정
-    // 자신의 카드는 항상 보이고, 게임이 끝났거나 showCards가 true면 모든 카드 표시
-    const isCardVisible = isMe || showCards || gameState.status === 'finished';
-    
-    return {
-      ...player,
-      position,
-      isMe,
-      isCurrentTurn,
-      isDead: player.isDie === true,
-      cards: mapCards(player.cards, isCardVisible)
-    };
-  });
+    if (!playersWithPosition.length) return [];
 
+    // 현재 플레이어 인덱스 찾기
+    let myIndex = playersWithPosition.findIndex(p => p.id === currentUserId);
+    
+    const gameShowCards = gameState.show_cards || false;
+    
+    return playersWithPosition.map((player, index) => {
+      // 상대적 위치 계산
+      let relativePosition = myIndex === -1 ? index : (index - myIndex + playersWithPosition.length) % playersWithPosition.length;
+      
+      // 카드 상태 계산
+      const playerCards = player.cards || [];
+      const cardStatus: { status: CardStatus; value?: string }[] = [];
+      
+      // 2장 게임 모드
+      if (gameState.game_mode === 2 || !gameState.game_mode) {
+        playerCards.forEach((card, idx) => {
+          // 카드 표시 여부 결정
+          const cardsVisible = gameState.status === 'finished' || gameShowCards;
+          const isMyCard = player.id === currentUserId;
+          
+          if (cardsVisible || isMyCard) {
+            cardStatus.push({ status: 'open', value: String(card) });
+          } else {
+            cardStatus.push({ status: 'hidden' });
+          }
+        });
+      } 
+      // 3장 게임 모드
+      else if (gameState.game_mode === 3) {
+        playerCards.forEach((card, idx) => {
+          const cardsVisible = gameState.status === 'finished' || gameShowCards;
+          const isMyCard = player.id === currentUserId;
+          const isOpenCard = player.open_card === card;
+          
+          // 첫 번째 베팅 라운드에서 오픈 카드 표시
+          if (gameState.betting_round === 1 && isOpenCard) {
+            cardStatus.push({ status: 'open', value: String(card) });
+          }
+          // 카드 표시 여부 결정
+          else if (cardsVisible || isMyCard) {
+            cardStatus.push({ status: 'open', value: String(card) });
+          } else {
+            cardStatus.push({ status: 'hidden' });
+          }
+        });
+      }
+      
+      // 플레이어 데이터 반환
+      return {
+        ...player,
+        position: relativePosition,
+        isMe: player.id === currentUserId,
+        isCurrentTurn: gameState.currentTurn === player.id,
+        isDead: player.isDie === true,
+        cards: cardStatus
+      };
+    });
+  }, [gameState, currentPlayerId, showCards]);
+  
   // 비어있는 자리 계산 (게임이 대기 중일 때만 참가 가능)
   const emptySlots = gameState.status === 'waiting' 
     ? Array.from({ length: maxPlayers }, (_, i) => i)
@@ -193,9 +205,26 @@ export function GameTable({
       return;
     }
     
-    // 닉네임 입력 모달 표시
-    setSelectedSeat(seatIndex);
-    setShowNicknameModal(true);
+    // 이미 참가한 플레이어인 경우, 자리 이동 처리
+    if (currentPlayer) {
+      try {
+        console.log(`자리 이동 시도: 좌석 ${seatIndex}`);
+        
+        // onSeatChange 함수가 있다면 호출
+        if (onSeatChange) {
+          await onSeatChange(seatIndex);
+          fetchGameState(); // 게임 상태 새로고침
+          toast.success('자리를 이동했습니다!');
+        }
+      } catch (error) {
+        console.error('자리 이동 오류:', error);
+        toast.error('자리를 이동할 수 없습니다.');
+      }
+    } else {
+      // 신규 플레이어인 경우, 닉네임 입력 모달 표시
+      setSelectedSeat(seatIndex);
+      setShowNicknameModal(true);
+    }
   };
 
   // 닉네임 입력 후 참가하기
@@ -235,114 +264,137 @@ export function GameTable({
     <div className="h-full min-h-screen w-full bg-gradient-to-b from-green-800 to-green-950 p-4">
       <div className="mx-auto flex h-full max-w-7xl flex-col lg:flex-row">
         {/* 메인 게임 영역 */}
-        <div className="relative mb-4 flex-1 overflow-hidden rounded-2xl bg-green-900 p-6 shadow-xl lg:mb-0 lg:mr-4">
-          <div className="relative h-full w-full overflow-hidden">
+        <div className="relative mb-4 flex-1 overflow-hidden rounded-2xl bg-gray-900 p-8 shadow-xl lg:mb-0 lg:mr-4">
+          <div className="relative w-full max-w-4xl mx-auto aspect-square">
             {/* 테이블 배경 */}
-            <div 
-              className="absolute inset-0 rounded-full bg-gradient-to-b from-green-800 to-green-900 m-8"
-              style={{
-                boxShadow: '0 0 30px rgba(0, 0, 0, 0.7), inset 0 0 80px rgba(0, 0, 0, 0.3), 0 0 15px rgba(255, 215, 0, 0.3)',
-                border: '10px solid #8B4513'
-              }}
-            >
+            <div className="absolute inset-0 rounded-full border-8 border-yellow-700 bg-green-800 flex items-center justify-center shadow-2xl">
               {/* 테이블 패턴 */}
-              <div className="absolute inset-2 rounded-full bg-green-700 bg-opacity-50 flex items-center justify-center">
-                <div className="w-[80%] h-[80%] rounded-full border-2 border-dashed border-green-500 border-opacity-50"></div>
-                <Image
-                  src="/images/table/bgM.png"
-                  alt="Table Background"
-                  layout="fill"
-                  objectFit="cover"
-                  className="rounded-full opacity-80"
-                />
-              </div>
-              
-              {/* 중앙 카드 및 배팅 영역 */}
-              <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center">
-                <div className="relative mb-3">
+              <div className="absolute w-[95%] h-[95%] rounded-full border-4 border-yellow-600 bg-green-700 flex items-center justify-center">
+                {/* 중앙 카드 및 배팅 영역 */}
+                <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center z-10">
                   <div className="px-4 py-2 bg-gray-900 bg-opacity-80 rounded-lg border border-yellow-600 shadow-lg">
                     <p className="text-yellow-400 font-bold text-center">
-                      총 배팅 금액: {gameState.bettingValue.toLocaleString()} 포인트
+                      {gameState.game_mode === 3 ? '3장 게임' : '2장 게임'} | 총 배팅 금액: {gameState?.bettingValue?.toLocaleString() ?? 0} 포인트
                     </p>
                   </div>
                 </div>
               </div>
             </div>
             
-            {/* 플레이어 위치 */}
-            {positionedPlayers.map(player => (
+            {/* 플레이어 배치 */}
+            {positionedPlayers.map((player) => (
               <TablePlayer
                 key={player.id}
-                position={player.position!}
-                username={player.username}
-                balance={player.balance}
-                isCurrentTurn={player.isCurrentTurn}
-                isDead={player.isDead}
-                isMe={player.isMe}
-                faceImage={`/images/ui/face${(parseInt(player.id) % 5) + 1}.png`}
-                cards={player.cards}
+                player={player}
+                isReady={player.is_ready}
+                mode={gameState.game_mode || 2}
+                bettingRound={gameState.betting_round || 1}
               />
             ))}
             
-            {/* 빈 자리 (게임 대기 중일 때만 표시) */}
-            {gameState.status === 'waiting' && emptySlots.map((position) => (
-              <div
-                key={`empty-${position}`}
-                className={cn(
-                  'absolute z-20',
-                  getEmptySlotStyles(position)
-                )}
-              >
-                <button
-                  onClick={() => handleSeatClick(position)}
-                  className="w-16 h-16 rounded-full flex items-center justify-center bg-gray-800 bg-opacity-60 hover:bg-opacity-80 border-2 border-dashed border-yellow-400 transition-all transform hover:scale-110"
-                >
-                  <span className="text-yellow-400 font-bold text-xs">
-                    {isObserver ? '참가하기' : '빈 자리'}
-                  </span>
-                </button>
-              </div>
-            ))}
-            
-            {/* 관찰자 모드 표시 */}
-            {isObserver && (
-              <div className="fixed top-4 left-4 px-4 py-2 bg-gray-800 bg-opacity-90 rounded-md border border-yellow-500 text-yellow-300 text-sm z-30 shadow-lg">
-                <span className="font-semibold">관찰자 모드</span> - 빈 자리를 클릭하여 참가하세요
-              </div>
-            )}
-            
-            {/* 게임 상태 표시 */}
-            {gameState.status === 'waiting' && (
-              <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-center z-30">
-                <div className="px-6 py-4 bg-black bg-opacity-70 rounded-lg border border-yellow-600 shadow-lg">
-                  <h2 className="text-2xl font-bold text-yellow-400 mb-2">게임 대기 중</h2>
-                  <p className="text-white">현재 {playerCount}명의 플레이어가 참가했습니다.</p>
-                  <p className="text-white mt-1">게임을 시작하려면 최소 2명의 플레이어가 필요합니다.</p>
-                </div>
-              </div>
-            )}
-            
-            {gameState.status === 'finished' && (
-              <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-center z-30">
-                <div className="px-6 py-4 bg-black bg-opacity-70 rounded-lg border border-yellow-600 shadow-lg">
-                  <h2 className="text-2xl font-bold text-yellow-400 mb-2">게임 종료!</h2>
-                  <p className="text-white">
-                    승자: {gameState.players.find(p => p.id === gameState.winner)?.username || '없음'}
-                  </p>
-                </div>
-              </div>
+            {/* 배팅 타이머 - 게임 중이고 현재 턴인 플레이어가 있을 때만 표시 */}
+            {gameState.status === 'playing' && gameState.currentTurn && (
+              <BettingTimer 
+                timeLimit={30} 
+                visible={gameState.status === 'playing'}
+                onTimeUp={() => {
+                  console.log('배팅 시간 초과');
+                  // 시간 초과 시 자동 다이 처리 로직 (필요하다면 구현)
+                }}
+              />
             )}
           </div>
-          
-          {/* 게임 결과 모달 - 게임이 끝나고 승자가 있을 때만 표시 */}
-          {gameState?.status === 'finished' && gameState.winner && (
-            <GameResult 
-              winner={gameState.players.find(p => p.id === gameState.winner) as Player} 
-              players={gameState.players} 
-              restartGame={handleRestartGame}
-            />
-          )}
         </div>
+        
+        {/* 관찰자 모드 메시지 */}
+        {isObserver && (
+          <div className="absolute top-4 left-4 px-4 py-2 bg-gray-800 bg-opacity-90 rounded-md border border-yellow-500 text-yellow-300 text-sm z-30 shadow-lg">
+            <span className="font-semibold">관찰자 모드</span> - 게임을 관찰하는 중입니다. 참가하시려면 빈 자리를 클릭하세요.
+          </div>
+        )}
+        
+        {/* 게임 상태 표시 */}
+        {gameState.status === 'waiting' && (
+          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-center z-30">
+            <div className="px-6 py-4 bg-black bg-opacity-70 rounded-lg border border-yellow-600 shadow-lg">
+              <h2 className="text-2xl font-bold text-yellow-400 mb-2">게임 대기 중</h2>
+              <p className="text-white">현재 {playerCount}명이 참가했습니다. 게임을 시작하려면 {maxPlayers}명이 참가해야 합니다.</p>
+              <p className="text-white mt-1">게임이 시작되면 각 플레이어는 2장의 카드를 받게 됩니다.</p>
+
+              {/* 게임 시작 버튼 */}
+              {isHost && onStartGame && (
+                <button 
+                  onClick={onStartGame}
+                  disabled={!canStartGame.canStart || isStartingGame}
+                  className={`px-4 py-2 rounded font-medium ${
+                    canStartGame.canStart 
+                      ? 'bg-yellow-600 hover:bg-yellow-700' 
+                      : 'bg-gray-600 cursor-not-allowed'}`}
+                  title={!canStartGame.canStart ? canStartGame.message : '게임 시작하기'}
+                >
+                  {isStartingGame ? '시작 중...' : '게임 시작'}
+                </button>
+              )}
+
+              {/* 준비 버튼 */}
+              {!isObserver && onToggleReady && (
+                <button 
+                  onClick={() => {
+                    // 준비 버튼 클릭 시 기본 배팅 금액 확인
+                    const player = gameState?.players.find(p => p.id === currentPlayerId);
+                    if (!isReady && player && player.balance < (gameState?.baseBet ?? 0)) {
+                      toast.error(`기본 배팅 금액이 부족합니다. 기본 배팅 금액: ${(gameState?.baseBet ?? 0).toLocaleString()}원`);
+                      return;
+                    }
+                    onToggleReady();
+                  }}
+                  disabled={!onToggleReady}
+                  className={`px-4 py-2 rounded font-medium ${isReady 
+                    ? 'bg-red-600 hover:bg-red-700' 
+                    : currentPlayer && currentPlayer.balance < (gameState?.baseBet ?? 0)
+                      ? 'bg-gray-600 cursor-not-allowed' // 기본 배팅 금액이 부족하면 버튼 비활성화
+                      : 'bg-green-600 hover:bg-green-700'}`}
+                  title={currentPlayer && currentPlayer.balance < (gameState?.baseBet ?? 0)
+                    ? `기본 배팅 금액: ${(gameState?.baseBet ?? 0).toLocaleString()}원`
+                    : isReady ? '준비 취소' : '준비 완료'}
+                >
+                  {isReady ? '준비 취소' : '준비 완료'}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+        
+        {gameState.status === 'finished' && (
+          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-center z-30">
+            <div className="px-6 py-4 bg-black bg-opacity-70 rounded-lg border border-yellow-600 shadow-lg">
+              <h2 className="text-2xl font-bold text-yellow-400 mb-2">게임 종료</h2>
+              <p className="text-white">
+                승자: {gameState.players.find(p => p.id === gameState.winner)?.username || '없음'}
+              </p>
+            </div>
+          </div>
+        )}
+        
+        {/* 빈 자리 (게임 대기 중일 때만 표시) */}
+        {gameState.status === 'waiting' && emptySlots.map((position) => (
+          <div
+            key={`empty-${position}`}
+            className={cn(
+              'absolute z-20',
+              getEmptySlotStyles(position)
+            )}
+          >
+            <button
+              onClick={() => handleSeatClick(position)}
+              className="w-16 h-16 rounded-full flex items-center justify-center bg-gray-800 bg-opacity-60 hover:bg-opacity-80 border-2 border-dashed border-yellow-400 transition-all transform hover:scale-110"
+            >
+              <span className="text-yellow-400 font-bold text-xs">
+                {isObserver ? '참가하기' : '빈 자리'}
+              </span>
+            </button>
+          </div>
+        ))}
         
         {/* 게임 정보 (상단) */}
         <div className="relative z-10 flex justify-between items-center px-4 py-2 bg-gray-900 bg-opacity-70 border-b border-gray-700">
@@ -360,15 +412,35 @@ export function GameTable({
               <div className="flex space-x-2">
                 {/* 방장이 아닌 경우 준비 버튼 표시 */}
                 {!isHost && onToggleReady && (
-                  <button 
-                    onClick={onToggleReady}
-                    disabled={!onToggleReady}
-                    className={`px-3 py-1 rounded text-sm font-bold transition-colors ${isReady 
-                      ? 'bg-red-600 hover:bg-red-700' 
-                      : 'bg-green-600 hover:bg-green-700'}`}
-                  >
-                    {isReady ? '준비 취소' : '준비 완료'}
-                  </button>
+                  <div className="relative">
+                    <button 
+                      onClick={() => {
+                        // 준비 버튼 클릭 시 기본 배팅 금액 확인
+                        const player = gameState?.players.find(p => p.id === currentPlayerId);
+                        if (!isReady && player && player.balance < (gameState?.baseBet ?? 0)) {
+                          toast.error(`기본 배팅 금액이 부족합니다. 기본 배팅 금액: ${(gameState?.baseBet ?? 0).toLocaleString()}원`);
+                          return;
+                        }
+                        onToggleReady();
+                      }}
+                      disabled={!onToggleReady}
+                      className={`px-3 py-1 rounded text-sm font-bold transition-colors ${isReady 
+                        ? 'bg-red-600 hover:bg-red-700' 
+                        : currentPlayer && currentPlayer.balance < (gameState?.baseBet ?? 0)
+                          ? 'bg-gray-600 cursor-not-allowed' // 기본 배팅 금액이 부족하면 버튼 비활성화
+                          : 'bg-green-600 hover:bg-green-700'}`}
+                      title={currentPlayer && currentPlayer.balance < (gameState?.baseBet ?? 0)
+                        ? `기본 배팅 금액: ${(gameState?.baseBet ?? 0).toLocaleString()}원`
+                        : isReady ? '준비 취소' : '준비 완료'}
+                    >
+                      {isReady ? '준비 취소' : '준비 완료'}
+                    </button>
+                    {!isReady && currentPlayer && currentPlayer.balance < (gameState?.baseBet ?? 0) && (
+                      <div className="absolute top-full left-0 mt-1 w-48 bg-red-800 text-white text-xs p-1 rounded shadow-lg">
+                        기본 배팅 금액: {(gameState?.baseBet ?? 0).toLocaleString()}원
+                      </div>
+                    )}
+                  </div>
                 )}
                 
                 {/* 방장인 경우 게임 시작 버튼 표시 */}
@@ -376,7 +448,7 @@ export function GameTable({
                   <button 
                     onClick={onStartGame}
                     disabled={!canStartGame.canStart || isStartingGame}
-                    className={`px-3 py-1 rounded text-sm font-bold transition-colors ${
+                    className={`px-3 py-1 rounded font-medium ${
                       canStartGame.canStart 
                         ? 'bg-yellow-600 hover:bg-yellow-700' 
                         : 'bg-gray-600 cursor-not-allowed'}`}
@@ -389,11 +461,24 @@ export function GameTable({
             )}
 
             {/* 현재 플레이어 잔액 표시 */}
-            <div className="bg-gray-800 px-3 py-1 rounded text-sm">
+            <div className="bg-gray-800 px-3 py-1 rounded text-sm flex items-center">
               <span className="text-gray-400">잔액: </span>
               <span className="text-yellow-300 font-bold">
-                {currentPlayer?.balance?.toLocaleString() || 0}원
+                {currentPlayer?.balance?.toLocaleString() ?? 0}원
               </span>
+              
+              {/* 기본 배팅 금액 표시 */}
+              {gameState.status === 'waiting' && (gameState?.baseBet ?? 0) > 0 && (
+                <div className="ml-3 flex items-center" title="기본 배팅 금액">
+                  <span className="text-gray-400 text-xs mr-1">기본 배팅:</span>
+                  <span className={`text-xs font-bold ${currentPlayer && currentPlayer.balance >= (gameState?.baseBet ?? 0) ? 'text-green-400' : 'text-red-400'}`}>
+                    {(gameState?.baseBet ?? 0).toLocaleString()}원
+                  </span>
+                  {currentPlayer && currentPlayer.balance < (gameState?.baseBet ?? 0) && (
+                    <span className="text-xs text-red-500 ml-1">(부족)</span>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -439,7 +524,14 @@ export function GameTable({
           </div>
         )}
         
-        {/* ... existing code ... */}
+        {/* 게임 결과 모달 - 게임이 끝나고 승자가 있을 때만 표시 */}
+        {gameState?.status === 'finished' && gameState.winner && (
+          <GameResult 
+            winner={gameState.players.find(p => p.id === gameState.winner) as Player} 
+            players={gameState.players} 
+            restartGame={handleRestartGame}
+          />
+        )}
       </div>
     </div>
   );
@@ -447,19 +539,25 @@ export function GameTable({
 
 // 빈 자리 위치 스타일 계산 함수
 function getEmptySlotStyles(position: number): string {
-  // 5개 위치에 맞게 스타일 설정 (원형 테이블 기준)
-  switch (position % 5) {
-    case 0: // 하단 중앙
-      return 'bottom-6 left-1/2 -translate-x-1/2';
-    case 1: // 하단 우측
-      return 'bottom-16 right-20 lg:right-28';
-    case 2: // 우측
-      return 'right-6 top-1/2 -translate-y-1/2';
-    case 3: // 상단 우측
-      return 'top-16 right-20 lg:right-28';
-    case 4: // 상단 중앙
-      return 'top-6 left-1/2 -translate-x-1/2';
+  // ube48 uc790ub9ac ud45cuc2dc uc704uce58ub97c uc5c5ub370uc774ud2b8ud558uc5ec ud50cub808uc774uc5b4 uc704uce58uc640 ub9deucd94uae30
+  switch (position % 8) {
+    case 0: // ud558ub2e8 uc911uc559
+      return 'bottom-[5%] left-1/2 -translate-x-1/2';
+    case 1: // uc624ub978ucabd ud558ub2e8
+      return 'bottom-[20%] right-[10%]';
+    case 2: // uc624ub978ucabd
+      return 'right-[5%] top-1/2 -translate-y-1/2';
+    case 3: // uc624ub978ucabd uc0c1ub2e8
+      return 'top-[20%] right-[10%]';
+    case 4: // uc0c1ub2e8 uc911uc559
+      return 'top-[5%] left-1/2 -translate-x-1/2';
+    case 5: // uc67cuc058 uc0c1ub2e8
+      return 'top-[20%] left-[10%]';
+    case 6: // uc67cuc058
+      return 'left-[5%] top-1/2 -translate-y-1/2';
+    case 7: // uc67cuc058 ud558ub2e8
+      return 'bottom-[20%] left-[10%]';
     default:
-      return 'bottom-6 left-1/2 -translate-x-1/2';
+      return 'bottom-[5%] left-1/2 -translate-x-1/2';
   }
-} 
+}

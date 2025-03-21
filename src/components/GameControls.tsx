@@ -12,14 +12,43 @@ interface GameControlsProps {
   onAction: () => void;
 }
 
-// 버튼 이미지 경로
-const buttonImages = {
-  call: '/images/ui/callbtn.png',
-  die: '/images/ui/diebtn.png',
-  double: '/images/ui/doublebtn.png',
-  half: '/images/ui/halfbtn.png',
-  quarter: '/images/ui/quarterbtn.png',
-  ping: '/images/ui/pingbtn.png'
+// 베팅 버튼 컴포넌트
+const BettingButton = ({ 
+  label, 
+  onClick, 
+  disabled = false,
+  variant = 'default' 
+}: { 
+  label: string; 
+  onClick: () => void; 
+  disabled?: boolean;
+  variant?: 'default' | 'primary' | 'success' | 'danger' | 'warning'
+}) => {
+  // 버튼 스타일링을 위한 함수
+  const getButtonStyle = () => {
+    switch(variant) {
+      case 'primary':
+        return 'bg-blue-600 hover:bg-blue-500 text-white';
+      case 'success':
+        return 'bg-green-600 hover:bg-green-500 text-white';
+      case 'danger':
+        return 'bg-red-600 hover:bg-red-500 text-white';
+      case 'warning':
+        return 'bg-yellow-600 hover:bg-yellow-500 text-white';
+      default:
+        return 'bg-gray-700 hover:bg-gray-600 text-white';
+    }
+  };
+
+  return (
+    <button
+      className={`relative h-12 rounded-md shadow-md ${getButtonStyle()} ${disabled ? 'opacity-50 cursor-not-allowed' : 'transform hover:scale-105 transition-transform'} font-bold`}
+      onClick={onClick}
+      disabled={disabled}
+    >
+      <span className="text-white font-bold text-sm">{label}</span>
+    </button>
+  );
 };
 
 export function GameControls({ gameState, currentPlayerId, onAction }: GameControlsProps) {
@@ -268,38 +297,6 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
     return gameState.bettingValue > 0;
   };
 
-  // 베팅 버튼 컴포넌트
-  const BettingButton = ({ 
-    imageSrc, 
-    label, 
-    onClick, 
-    disabled = false 
-  }: { 
-    imageSrc: string; 
-    label: string; 
-    onClick: () => void; 
-    disabled?: boolean; 
-  }) => (
-    <button
-      className={`relative h-12 overflow-hidden rounded-md shadow-md ${
-        disabled ? 'opacity-50 cursor-not-allowed' : 'transform hover:scale-105 transition-transform'
-      }`}
-      onClick={onClick}
-      disabled={disabled}
-    >
-      <Image
-        src={imageSrc}
-        alt={label}
-        width={100}
-        height={48}
-        className="w-full h-full object-cover"
-      />
-      <span className="absolute inset-0 flex items-center justify-center text-white font-bold text-sm drop-shadow-lg">
-        {label}
-      </span>
-    </button>
-  );
-
   if (isGameFinished) {
     return (
       <div className="p-6 bg-gray-900 bg-opacity-90 rounded-lg border border-yellow-500 shadow-lg">
@@ -329,7 +326,7 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
         <div className="flex justify-center">
           <div className="spinner"></div>
         </div>
-        <p className="text-gray-300 text-center mt-4">특수 패(구사/멍텅구리구사) 발생으로 재경기를 준비하고 있습니다.</p>
+        <p className="text-gray-300 text-center mt-4">특수 패(구사/멍텅구사) 발생으로 재경기를 준비하고 있습니다.</p>
         <p className="text-yellow-400 text-center mt-2 font-bold">{remainingTime}초 후 재시작...</p>
         
         <style jsx>{`
@@ -452,61 +449,61 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
               </div>
             </div>
             
-            {/* 배팅 이미지 버튼 - 화면 아래쪽 배치 */}
+            {/* 배팅 버튼 */}
             <div className="grid grid-cols-3 gap-2 mt-2">
               {/* 첫 번째 줄 */}
               {!hasPreviousBet() && (
                 <BettingButton
-                  imageSrc="/images/ui/checkbtn.png"
                   label="체크"
                   onClick={handleCheck}
                   disabled={isLoading}
+                  variant="success"
                 />
               )}
               
               {hasPreviousBet() && (
                 <BettingButton
-                  imageSrc={buttonImages.call}
                   label="콜"
                   onClick={handleCall}
                   disabled={isLoading}
+                  variant="primary"
                 />
               )}
               
               <BettingButton
-                imageSrc={buttonImages.half}
                 label="하프"
                 onClick={handleHalf}
                 disabled={isLoading || (currentPlayer?.balance || 0) < Math.floor(gameState.bettingValue / 2)}
+                variant="warning"
               />
               
               <BettingButton
-                imageSrc={buttonImages.double}
                 label="따당"
                 onClick={handleDouble}
                 disabled={isLoading || (currentPlayer?.balance || 0) < gameState.bettingValue * 2}
+                variant="danger"
               />
               
               {/* 두 번째 줄 */}
               <BettingButton
-                imageSrc={buttonImages.ping}
                 label="삥"
                 onClick={handlePing}
                 disabled={isLoading || (currentPlayer?.balance || 0) < gameState.bettingValue}
+                variant="primary"
               />
               
               <BettingButton
-                imageSrc={buttonImages.quarter}
                 label="쿼터"
                 onClick={handleQuarter}
                 disabled={isLoading || Math.floor(gameState.bettingValue / 4) <= 0 || (currentPlayer?.balance || 0) < Math.floor(gameState.bettingValue / 4)}
+                variant="success"
               />
               
               <BettingButton
-                imageSrc={buttonImages.die}
                 label="다이"
                 onClick={handleDie}
                 disabled={isLoading}
+                variant="danger"
               />
             </div>
           </div>
@@ -519,10 +516,10 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
             <div className="flex justify-end">
               <div className="w-1/2">
                 <BettingButton
-                  imageSrc={buttonImages.die}
                   label="다이 (포기)"
                   onClick={handleDie}
                   disabled={isLoading || currentPlayer?.isDie}
+                  variant="danger"
                 />
               </div>
             </div>
