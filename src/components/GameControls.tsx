@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import { GameState, BetActionType } from '@/types/game';
 import { startGame, placeBet } from '@/lib/gameApi';
+import soundPlayer from '@/utils/soundEffects';
 
 interface GameControlsProps {
   gameState: GameState;
@@ -15,7 +16,7 @@ interface GameControlsProps {
 const buttonImages = {
   call: '/images/ui/callbtn.png',
   die: '/images/ui/diebtn.png',
-  bet: '/images/ui/doublebtn.png', 
+  double: '/images/ui/doublebtn.png',
   half: '/images/ui/halfbtn.png',
   quarter: '/images/ui/quarterbtn.png',
   ping: '/images/ui/pingbtn.png'
@@ -25,6 +26,23 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
   const [betAmount, setBetAmount] = useState<number>(500);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isMuted, setIsMuted] = useState(false);
+
+  // 사운드 플레이어 초기화 및 게임 상태에 따른 효과음 처리
+  useEffect(() => {
+    soundPlayer.initialize();
+    
+    // 컴포넌트 언마운트 시 배경음악 중지
+    return () => {
+      soundPlayer.pauseBGM();
+    };
+  }, [gameState.status]);
+
+  // 음소거 토글 함수
+  const toggleMute = () => {
+    const newMutedState = soundPlayer.toggleMute();
+    setIsMuted(newMutedState);
+  };
 
   const isCurrentTurn = gameState.currentTurn === currentPlayerId;
   const isGameWaiting = gameState.status === 'waiting';
@@ -46,6 +64,8 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
     
     try {
       await startGame(gameState.id);
+      // 카드 배분 사운드 재생
+      soundPlayer.play('handout');
       onAction();
     } catch (err) {
       console.error('게임 시작 오류:', err);
@@ -73,6 +93,8 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
       }
       
       await placeBet(gameState.id, currentPlayerId, 'bet', betValue);
+      // 일반 베팅 사운드 재생
+      soundPlayer.play('call');
       onAction();
     } catch (err) {
       console.error('베팅 오류:', err);
@@ -89,6 +111,8 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
     
     try {
       await placeBet(gameState.id, currentPlayerId, 'call');
+      // 콜 사운드 재생
+      soundPlayer.play('call');
       onAction();
     } catch (err) {
       console.error('콜 오류:', err);
@@ -105,6 +129,8 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
     
     try {
       await placeBet(gameState.id, currentPlayerId, 'die');
+      // 다이 사운드 재생
+      soundPlayer.play('die');
       onAction();
     } catch (err) {
       console.error('다이 오류:', err);
@@ -121,6 +147,8 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
     
     try {
       await placeBet(gameState.id, currentPlayerId, 'half');
+      // 하프 사운드 재생
+      soundPlayer.play('half');
       onAction();
     } catch (err) {
       console.error('하프 오류:', err);
@@ -137,6 +165,8 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
     
     try {
       await placeBet(gameState.id, currentPlayerId, 'check');
+      // 체크 사운드 재생
+      soundPlayer.play('check');
       onAction();
     } catch (err) {
       console.error('체크 오류:', err);
@@ -164,10 +194,69 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
       }
       
       await placeBet(gameState.id, currentPlayerId, 'bet', doubleAmount);
+      // 따당(삥) 사운드 재생
+      soundPlayer.play('double');
       onAction();
     } catch (err) {
       console.error('따당 베팅 오류:', err);
       setError('따당 베팅 중 오류가 발생했습니다.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 쿼터 베팅 처리 추가
+  const handleQuarter = async () => {
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      if (!currentPlayer) {
+        throw new Error('플레이어 정보를 찾을 수 없습니다.');
+      }
+      
+      const quarterAmount = Math.floor(gameState.bettingValue / 4);
+      
+      if (quarterAmount <= 0 || quarterAmount > currentPlayer.balance) {
+        throw new Error('유효하지 않은 베팅 금액입니다.');
+      }
+      
+      await placeBet(gameState.id, currentPlayerId, 'bet', quarterAmount);
+      // 쿼터 사운드 재생 (call 사운드 사용)
+      soundPlayer.play('call');
+      onAction();
+    } catch (err) {
+      console.error('쿼터 베팅 오류:', err);
+      setError('쿼터 베팅 중 오류가 발생했습니다.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 삥 처리 추가
+  const handlePing = async () => {
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      if (!currentPlayer) {
+        throw new Error('플레이어 정보를 찾을 수 없습니다.');
+      }
+      
+      // 삥은 현재 베팅 금액과 동일한 금액으로 베팅
+      const betValue = gameState.bettingValue || 500;
+      
+      if (betValue <= 0 || betValue > currentPlayer.balance) {
+        throw new Error('유효하지 않은 베팅 금액입니다.');
+      }
+      
+      await placeBet(gameState.id, currentPlayerId, 'bet', betValue);
+      // 삥 사운드 재생
+      soundPlayer.play('ping');
+      onAction();
+    } catch (err) {
+      console.error('삥 베팅 오류:', err);
+      setError('삥 베팅 중 오류가 발생했습니다.');
     } finally {
       setIsLoading(false);
     }
@@ -304,11 +393,29 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
         {/* 화면이 테이블 위에 겹쳐질 때는 컴팩트하게 표시 */}
         <div className="flex justify-between items-center mb-2">
           <h2 className="text-lg font-bold text-yellow-400">게임 진행 중</h2>
-          <div className="text-right">
-            <p className="text-yellow-400 font-bold">{gameState.bettingValue} 포인트</p>
-          {currentPlayer && (
-              <p className="text-xs text-gray-300">내 잔액: {currentPlayer.balance} P</p>
-          )}
+          <div className="flex items-center">
+            <button 
+              onClick={toggleMute}
+              className="mr-2 p-1 rounded-full bg-gray-700 hover:bg-gray-600 focus:outline-none"
+              title={isMuted ? "음소거 해제" : "음소거"}
+            >
+              {isMuted ? (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" clipRule="evenodd" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                </svg>
+              )}
+            </button>
+            <div className="text-right">
+              <p className="text-yellow-400 font-bold">{gameState.bettingValue} 포인트</p>
+              {currentPlayer && (
+                <p className="text-xs text-gray-300">내 잔액: {currentPlayer.balance} P</p>
+              )}
+            </div>
           </div>
         </div>
         
@@ -347,7 +454,7 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
             
             {/* 배팅 이미지 버튼 - 화면 아래쪽 배치 */}
             <div className="grid grid-cols-3 gap-2 mt-2">
-              {/* 체크 버튼 - 이전 베팅이 없을 때만 표시 */}
+              {/* 첫 번째 줄 */}
               {!hasPreviousBet() && (
                 <BettingButton
                   imageSrc="/images/ui/checkbtn.png"
@@ -357,32 +464,42 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
                 />
               )}
               
-              <BettingButton
-                imageSrc={buttonImages.call}
-                label="콜"
-                onClick={handleCall}
-                disabled={isLoading || !hasPreviousBet()}
-              />
-              
-              <BettingButton
-                imageSrc={buttonImages.bet}
-                label="따당"
-                onClick={handleDouble}
-                disabled={isLoading || (currentPlayer?.balance || 0) < gameState.bettingValue * 2}
-              />
-              
-              <BettingButton
-                imageSrc={buttonImages.quarter}
-                label="쿼터"
-                onClick={() => handleBet(Math.floor(gameState.bettingValue / 4))}
-                disabled={isLoading || Math.floor(gameState.bettingValue / 4) <= 0 || (currentPlayer?.balance || 0) < Math.floor(gameState.bettingValue / 4)}
-              />
+              {hasPreviousBet() && (
+                <BettingButton
+                  imageSrc={buttonImages.call}
+                  label="콜"
+                  onClick={handleCall}
+                  disabled={isLoading}
+                />
+              )}
               
               <BettingButton
                 imageSrc={buttonImages.half}
                 label="하프"
                 onClick={handleHalf}
-                disabled={isLoading}
+                disabled={isLoading || (currentPlayer?.balance || 0) < Math.floor(gameState.bettingValue / 2)}
+              />
+              
+              <BettingButton
+                imageSrc={buttonImages.double}
+                label="따당"
+                onClick={handleDouble}
+                disabled={isLoading || (currentPlayer?.balance || 0) < gameState.bettingValue * 2}
+              />
+              
+              {/* 두 번째 줄 */}
+              <BettingButton
+                imageSrc={buttonImages.ping}
+                label="삥"
+                onClick={handlePing}
+                disabled={isLoading || (currentPlayer?.balance || 0) < gameState.bettingValue}
+              />
+              
+              <BettingButton
+                imageSrc={buttonImages.quarter}
+                label="쿼터"
+                onClick={handleQuarter}
+                disabled={isLoading || Math.floor(gameState.bettingValue / 4) <= 0 || (currentPlayer?.balance || 0) < Math.floor(gameState.bettingValue / 4)}
               />
               
               <BettingButton

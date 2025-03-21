@@ -139,7 +139,7 @@ function getPositionStyles(position: number): { container: string; cards: string
     case 2: // 우측
       return {
         container: 'right-4 top-1/2 -translate-y-1/2',
-        cards: 'ml-2 flex-col space-y-1 space-x-0'
+        cards: 'ml-2'
       };
     case 3: // 상단 우측
       return {
@@ -159,7 +159,7 @@ function getPositionStyles(position: number): { container: string; cards: string
     case 6: // 좌측
       return {
         container: 'left-4 top-1/2 -translate-y-1/2',
-        cards: 'mr-2 flex-col space-y-1 space-x-0'
+        cards: 'mr-2'
       };
     case 7: // 하단 좌측
       return {

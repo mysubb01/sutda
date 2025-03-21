@@ -8,7 +8,6 @@ import { joinGame } from '@/lib/gameApi';
 export default function JoinGame() {
   const router = useRouter();
   const [gameId, setGameId] = useState('');
-  const [username, setUsername] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -20,16 +19,12 @@ export default function JoinGame() {
       return;
     }
     
-    if (!username.trim()) {
-      setError('사용자 이름을 입력해주세요.');
-      return;
-    }
-    
     setIsLoading(true);
     setError(null);
     
     try {
-      // 게임에 참가
+      // 기본 '게스트' 닉네임으로 게임에 참가
+      const username = `게스트${Math.floor(Math.random() * 1000)}`;
       const { playerId, gameState } = await joinGame(gameId, username);
       
       // 로컬 스토리지에 플레이어 정보 저장
@@ -69,21 +64,6 @@ export default function JoinGame() {
               onChange={(e) => setGameId(e.target.value)}
               className="w-full px-3 py-2 bg-gray-800 rounded-md border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="참가할 게임 ID를 입력하세요"
-              disabled={isLoading}
-            />
-          </div>
-          
-          <div>
-            <label htmlFor="username" className="block text-sm font-medium mb-2">
-              사용자 이름
-            </label>
-            <input
-              type="text"
-              id="username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              className="w-full px-3 py-2 bg-gray-800 rounded-md border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="게임에서 사용할 이름을 입력하세요"
               disabled={isLoading}
             />
           </div>

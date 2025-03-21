@@ -178,11 +178,7 @@ export function GameTable({
       
       if (isObserver) {
         // 관찰자가 빈 자리 클릭 시 -> 플레이어로 참가
-        const playerName = prompt('참가할 이름을 입력하세요:') || '게스트';
-        if (!playerName.trim()) {
-          toast.error('이름을 입력해주세요.');
-          return;
-        }
+        const playerName = `게스트${Math.floor(Math.random() * 1000)}`;
         
         console.log(`참가 시도: 좌석 ${seatIndex}, 이름 ${playerName}`);
         const { playerId } = await joinGame(gameId, playerName, seatIndex);

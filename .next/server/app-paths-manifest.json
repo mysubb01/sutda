@@ -1,5 +1,6 @@
 {
-  "/game/create/page": "app/game/create/page.js",
   "/page": "app/page.js",
-  "/game/[id]/page": "app/game/[id]/page.js"
+  "/game/create/page": "app/game/create/page.js",
+  "/game/[id]/page": "app/game/[id]/page.js",
+  "/game/join/page": "app/game/join/page.js"
 }
