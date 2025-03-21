@@ -43,15 +43,15 @@ interface CardPairProps {
 export function CardPair({
   cards = [],
   isHidden = false,
-  width = 60,
-  height = 84
+  width = 80,
+  height = 110
 }: CardPairProps) {
   // 카드가 없는 경우 빈 자리 표시
   if (!cards || cards.length === 0) {
     return (
       <div className="flex space-x-1">
-        <div className="w-[60px] h-[84px] bg-gray-800 rounded-sm opacity-30"></div>
-        <div className="w-[60px] h-[84px] bg-gray-800 rounded-sm opacity-30"></div>
+        <div className="w-[80px] h-[110px] bg-gray-800 rounded-sm opacity-30"></div>
+        <div className="w-[80px] h-[110px] bg-gray-800 rounded-sm opacity-30"></div>
       </div>
     );
   }
@@ -62,7 +62,7 @@ export function CardPair({
       {cards.length > 1 ? (
         <Card card={cards[1]} isHidden={isHidden} width={width} height={height} />
       ) : (
-        <div className="w-[60px] h-[84px] bg-gray-800 rounded-sm opacity-30"></div>
+        <div className="w-[80px] h-[110px] bg-gray-800 rounded-sm opacity-30"></div>
       )}
     </div>
   );

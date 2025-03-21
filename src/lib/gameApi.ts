@@ -1,48 +1,167 @@
 import { supabase } from './supabase';
 import { GameState, CreateGameResponse, JoinGameResponse, BetActionType } from '@/types/game';
 import { v4 as uuidv4 } from 'uuid';
-import { determineWinner, evaluateCards } from '@/utils/gameLogic';
+import { 
+  evaluateCards, 
+  determineWinner, 
+  findBestCombination 
+} from '../utils/gameLogic';
 import { Player } from '@/types/game';
+import { logInfo, logError, logGameStart, logGameEnd, logBettingAction, logCardAction, logTimeout, logSystemError } from './logService';
 
 // 상수 정의 (파일 상단에 추가)
 const REGAME_WAIT_TIME_MS = 5000; // 재경기 대기 시간 (5초)
+const BETTING_TIME_LIMIT_MS = 30000; // 베팅 제한 시간 (30초)
+const CARD_SELECTION_TIME_LIMIT_MS = 20000; // 카드 선택 제한 시간 (20초)
+
+// 오류 타입 상수 정의
+const ErrorType = {
+  DB_ERROR: 'database_error',
+  GAME_NOT_FOUND: 'game_not_found',
+  PLAYER_NOT_FOUND: 'player_not_found',
+  INVALID_ACTION: 'invalid_action',
+  INVALID_STATE: 'invalid_state',
+  INVALID_TURN: 'invalid_turn',
+  NETWORK_ERROR: 'network_error',
+  TIMEOUT_ERROR: 'timeout_error',
+  UNKNOWN_ERROR: 'unknown_error',
+  GAME_ACTION_ERROR: 'game_action_error'
+};
+
+/**
+ * 게임 API 오류 처리 유틸리티
+ * 오류 타입에 따라 일관된 형식의 오류 객체를 생성
+ */
+function handleGameError(error: any, errorType: string = ErrorType.UNKNOWN_ERROR, context: string = ''): Error {
+  // 오류 정보 구조화
+  const timestamp = new Date().toISOString();
+  const errorId = `error_${Math.random().toString(36).substr(2, 9)}`;
+  
+  // 오류 로깅
+  console.error(`[${timestamp}] [${errorId}] [${errorType}] ${context}:`, error);
+  
+  // 사용자 친화적 오류 메시지 생성
+  let userMessage = '알 수 없는 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
+  
+  switch (errorType) {
+    case ErrorType.DB_ERROR:
+      userMessage = '데이터베이스 연결 중 오류가 발생했습니다.';
+      break;
+    case ErrorType.GAME_NOT_FOUND:
+      userMessage = '게임을 찾을 수 없습니다.';
+      break;
+    case ErrorType.PLAYER_NOT_FOUND:
+      userMessage = '플레이어 정보를 찾을 수 없습니다.';
+      break;
+    case ErrorType.INVALID_ACTION:
+      userMessage = '유효하지 않은 액션입니다.';
+      break;
+    case ErrorType.INVALID_STATE:
+      userMessage = '현재 게임 상태에서는 해당 액션을 수행할 수 없습니다.';
+      break;
+    case ErrorType.INVALID_TURN:
+      userMessage = '현재 당신의 차례가 아닙니다.';
+      break;
+    case ErrorType.NETWORK_ERROR:
+      userMessage = '네트워크 연결에 문제가 발생했습니다. 연결 상태를 확인해주세요.';
+      break;
+    case ErrorType.TIMEOUT_ERROR:
+      userMessage = '요청 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.';
+      break;
+  }
+  
+  // 개발용 정보 추가한 확장 오류 객체 생성
+  const gameError = new Error(userMessage);
+  (gameError as any).errorType = errorType;
+  (gameError as any).errorId = errorId;
+  (gameError as any).timestamp = timestamp;
+  (gameError as any).originalError = error;
+  
+  return gameError;
+}
+
+/**
+ * 데이터베이스 오류를 처리하는 전용 함수
+ */
+function handleDatabaseError(error: any, context: string = ''): Error {
+  return handleGameError(error, ErrorType.DB_ERROR, `DB 오류 (${context})`);
+}
+
+/**
+ * 자원 조회 실패(게임, 플레이어 등)를 처리하는 함수
+ */
+function handleResourceNotFoundError(resourceType: string, resourceId: string, error: any = null): Error {
+  const errorType = resourceType === 'game' ? ErrorType.GAME_NOT_FOUND : ErrorType.PLAYER_NOT_FOUND;
+  return handleGameError(error, errorType, `${resourceType} ${resourceId} 조회 실패`);
+}
 
 /**
  * 새로운 게임 생성
  */
 export async function createGame(username: string): Promise<CreateGameResponse> {
-  const gameId = uuidv4();
-  const playerId = uuidv4();
-  // 임시 사용자 ID 생성
-  const userId = `user_${Math.random().toString(36).substring(2, 9)}`;
-  
   try {
+    const gameId = uuidv4();
+    const playerId = uuidv4();
+    const timestamp = new Date().toISOString();
+
     // 게임 생성
-    const { data: gameData, error: gameError } = await supabase
+    const { error: gameError } = await supabase
       .from('games')
       .insert({
         id: gameId,
         status: 'waiting',
         current_turn: null,
+        winner: null,
+        created_at: timestamp,
+        updated_at: timestamp,
+        show_cards: false,
         betting_value: 0,
-        winner: null
-      })
-      .select();
-    
+        total_pot: 0,
+        base_bet: 10,
+        game_mode: 2,  // 기본 2장 모드
+        betting_round: 1 // 기본 1라운드
+      });
+
     if (gameError) {
-      console.error('게임 생성 오류 세부 정보:', gameError);
-      throw new Error('게임을 생성할 수 없습니다: ' + gameError.message);
+      throw handleDatabaseError(gameError, 'createGame');
     }
-    
-    console.log('게임 생성 성공:', gameId);
-    
-    // 관찰자 모드로 시작하므로 플레이어를 생성하지 않음
-    // 클라이언트는 빈 자리를 클릭해 참여해야 함
-    
-    return { gameId, playerId: null };
-  } catch (err) {
-    console.error('게임 생성 중 예외 발생:', err);
-    throw err;
+
+    // 플레이어 생성
+    const { error: playerError } = await supabase
+      .from('players')
+      .insert({
+        id: playerId,
+        game_id: gameId,
+        user_id: uuidv4(), // 임시 사용자 ID 생성
+        username: username,
+        balance: 1000,  // 기본 잔액
+        created_at: timestamp,
+        updated_at: timestamp,
+        seat_index: 0 // 기본 좌석 인덱스 0
+      });
+
+    if (playerError) {
+      throw handleDatabaseError(playerError, 'createGame player');
+    }
+
+    // 게임 생성 로그 기록
+    await logInfo(
+      gameId,
+      'game',
+      `게임 생성: ${username}(이)가 생성함`,
+      playerId,
+      { username }
+    );
+
+    return {
+      gameId,
+      playerId
+    };
+  } catch (error: any) { 
+    console.error('게임 생성 중 오류:', error);
+    // gameId가 정의되지 않은 경우 빈 문자열 사용
+    await logSystemError('', 'createGame', error);
+    throw handleGameError(error, ErrorType.DB_ERROR, '게임 생성 중 오류');
   }
 }
 
@@ -63,8 +182,7 @@ export async function joinGame(
       .single();
 
     if (gameError || !gameData) {
-      console.error('게임 조회 오류 세부 정보:', gameError);
-      throw new Error('게임을 찾을 수 없습니다: ' + (gameError?.message || '알 수 없는 오류'));
+      throw handleResourceNotFoundError('game', gameId, gameError);
     }
     
     // 로컬 스토리지에서 사용자 ID와 플레이어 ID 확인
@@ -105,7 +223,7 @@ export async function joinGame(
     
     // 새 플레이어 참가 (게임이 대기 중일 때만)
     if (gameData.status !== 'waiting') {
-      throw new Error('이미 시작된 게임에는 참가할 수 없습니다.');
+      throw handleGameError(null, ErrorType.INVALID_STATE, 'joinGame');
     }
     
     const playerId = uuidv4();
@@ -127,8 +245,7 @@ export async function joinGame(
       .select();
     
     if (playerError) {
-      console.error('플레이어 생성 오류 세부 정보:', playerError);
-      throw new Error('게임에 참가할 수 없습니다: ' + playerError.message);
+      throw handleDatabaseError(playerError, 'joinGame');
     }
     
     console.log('플레이어 참가 성공:', playerId);
@@ -159,8 +276,7 @@ export async function getGameState(gameId: string): Promise<GameState> {
     .single();
 
   if (gameError || !gameData) {
-    console.error('게임 조회 오류:', gameError);
-    throw new Error('게임을 찾을 수 없습니다.');
+    throw handleResourceNotFoundError('game', gameId, gameError);
   }
   
   // 플레이어 정보 가져오기
@@ -170,8 +286,7 @@ export async function getGameState(gameId: string): Promise<GameState> {
     .eq('game_id', gameId);
   
   if (playersError) {
-    console.error('플레이어 조회 오류:', playersError);
-    throw new Error('플레이어 정보를 불러올 수 없습니다.');
+    throw handleDatabaseError(playersError, 'getGameState');
   }
   
   // 재경기 남은 시간 계산
@@ -211,283 +326,141 @@ export async function getGameState(gameId: string): Promise<GameState> {
  * 게임 시작
  */
 export async function startGame(gameId: string): Promise<void> {
-  // 게임 및 플레이어 정보 가져오기
-  const { data: playersData, error: playersError } = await supabase
-    .from('players')
-    .select('id')
-    .eq('game_id', gameId);
+  try {
+    // 게임 정보 조회
+    const { data: gameData, error: gameError } = await supabase
+      .from('games')
+      .select('*, rooms(*)')
+      .eq('id', gameId)
+      .single();
 
-  if (playersError || !playersData || playersData.length < 2) {
-    throw new Error('최소 2명의 플레이어가 필요합니다.');
-  }
-  
-  // 카드 덱 생성 및 셔플
-  const deck = createShuffledDeck();
-  
-  // 플레이어들에게 카드 배분 및 업데이트
-  for (let i = 0; i < playersData.length; i++) {
-    const playerCards = [deck.pop(), deck.pop()].filter(Boolean) as number[];
-    
-    const { error: updateError } = await supabase
-      .from('players')
-      .update({ cards: playerCards })
-      .eq('id', playersData[i].id);
-    
-    if (updateError) {
-      console.error('플레이어 카드 업데이트 오류:', updateError);
-      throw new Error('카드를 배분할 수 없습니다.');
+    if (gameError || !gameData) {
+      throw handleResourceNotFoundError('game', gameId, gameError);
     }
+
+    const roomData = gameData.rooms;
+    const gameMode = roomData.mode;
+
+    // 참여 플레이어 조회
+    const { data: playersData, error: playersError } = await supabase
+      .from('players')
+      .select('*')
+      .eq('game_id', gameId)
+      .is('is_die', false);
+
+    if (playersError) {
+      throw handleDatabaseError(playersError, 'startGame');
+    }
+
+    // 최소 2명 이상 참여 확인
+    if (playersData.length < 2) {
+      throw handleGameError(null, ErrorType.INVALID_STATE, 'startGame');
+    }
+
+    // 카드 덱 생성 및 셔플
+    const deck = createShuffledDeck();
+    
+    // 2장 모드와 3장 모드에 따라 다르게 처리
+    if (gameMode === 2) {
+      // 2장 모드: 플레이어당 2장씩 배분
+      for (let i = 0; i < playersData.length; i++) {
+        const playerCards = [deck.pop()!, deck.pop()!];
+        
+        await supabase
+          .from('players')
+          .update({ 
+            cards: playerCards,
+            is_die: false 
+          })
+          .eq('id', playersData[i].id);
+      }
+    } else if (gameMode === 3) {
+      // 3장 모드: 플레이어당 2장씩 먼저 배분 (모두 비공개)
+      for (let i = 0; i < playersData.length; i++) {
+        const playerCards = [deck.pop()!, deck.pop()!];
+        
+        await supabase
+          .from('players')
+          .update({ 
+            cards: playerCards,
+            open_card: null, // 초기에는 공개 카드 없음
+            selected_cards: null, // 선택한 카드 초기화
+            is_die: false 
+          })
+          .eq('id', playersData[i].id);
+      }
+    }
+
+    // 첫 번째 플레이어부터 시작
+    const firstPlayerId = playersData[0].id;
+
+    // 게임 상태 업데이트
+    await supabase
+      .from('games')
+      .update({
+        status: 'playing',
+        current_turn: firstPlayerId,
+        betting_round: 1,
+        base_bet: 1000, // 기본 배팅액 설정
+        betting_value: 0,
+        winner: null,
+        total_pot: playersData.length * roomData.entry_fee // 참가비를 합한 초기 팟
+      })
+      .eq('id', gameId);
+
+    // 게임 시작 액션 기록
+    await recordGameAction(gameId, 'start', null);
+
+    console.log(`게임 시작: ${gameId} (${gameMode}장 모드)`);
+
+    // 베팅 타임아웃 설정
+    setTimeout(async () => {
+      try {
+        // 게임 상태 다시 확인 (중간에 게임이 종료되었을 수 있음)
+        const { data: currentGame, error: currentGameError } = await supabase
+          .from('games')
+          .select('status, current_turn, betting_end_time, betting_round')
+          .eq('id', gameId)
+          .single();
+        
+        if (currentGameError) {
+          console.error('게임 상태 확인 중 오류:', currentGameError);
+          return;
+        }
+        
+        // 게임이 아직 진행 중이고 베팅 타임아웃이 끝났으면 베팅 타임아웃 처리
+        if (currentGame && currentGame.status === 'playing' && 
+            currentGame.current_turn === firstPlayerId && 
+            new Date(currentGame.betting_end_time) <= new Date()) {
+          console.log(`게임 ${gameId}: 베팅 타임아웃, 자동 폴드 처리`);
+          await handleBettingTimeout(gameId);
+        }
+      } catch (err) {
+        console.error('베팅 타임아웃 처리 중 오류:', err);
+      }
+    }, BETTING_TIME_LIMIT_MS);
+  } catch (error) {
+    console.error('게임 시작 중 오류 발생:', error);
+    throw error;
   }
-  
-  // 첫 턴을 랜덤으로 선택
-  const firstTurn = playersData[Math.floor(Math.random() * playersData.length)].id;
-  
-  // 게임 상태 업데이트
-  const { error: updateError } = await supabase
-    .from('games')
-    .update({
-      status: 'playing',
-      current_turn: firstTurn,
-      betting_value: 0
-    })
-    .eq('id', gameId);
-  
-  if (updateError) {
-    console.error('게임 상태 업데이트 오류:', updateError);
-    throw new Error('게임을 시작할 수 없습니다.');
-  }
-  
-  // 게임 시작 액션 기록
-  await recordGameAction(gameId, 'start', firstTurn);
 }
 
 /**
  * 베팅
  */
 export async function placeBet(
-  gameId: string, 
-  playerId: string, 
-  actionType: BetActionType, 
+  gameId: string,
+  playerId: string,
+  actionType: BetActionType,
   amount?: number
 ): Promise<void> {
-  // 게임 상태 확인
-  const gameState = await getGameState(gameId);
-  
-  if (gameState.status !== 'playing') {
-    throw new Error('게임이 진행 중이 아닙니다.');
+  try {
+    // betAction 함수를 호출하여 베팅 처리
+    await betAction(gameId, playerId, actionType, amount || 0);
+  } catch (error) {
+    console.error('베팅 중 오류:', error);
+    throw error;
   }
-  
-  if (gameState.currentTurn !== playerId) {
-    throw new Error('당신의 턴이 아닙니다.');
-  }
-  
-  const player = gameState.players.find(p => p.id === playerId);
-  if (!player) {
-    throw new Error('플레이어를 찾을 수 없습니다.');
-  }
-
-  // 최근 배팅 액션 조회
-  const { data: actionsData, error: actionsError } = await supabase
-    .from('game_actions')
-    .select('*')
-    .eq('game_id', gameId)
-    .order('created_at', { ascending: false })
-    .limit(10);
-
-  if (actionsError) {
-    console.error('게임 액션 조회 오류:', actionsError);
-    throw new Error('게임 액션을 조회할 수 없습니다.');
-  }
-
-  // 마지막 배팅 액션 찾기
-  const lastBetAction = actionsData?.find(action => 
-    ['bet', 'raise', 'call', 'half'].includes(action.action_type) && 
-    action.player_id !== playerId
-  );
-
-  // 액션 별 배팅 금액 계산
-  let betAmount = 0;
-  const baseBet = gameState.baseBet || 500; // 기본 배팅액
-  
-  switch (actionType) {
-    case 'check':
-      // 이전 베팅이 없을 때만 가능
-      if (lastBetAction && lastBetAction.amount > 0) {
-        throw new Error('이전 베팅이 있어 체크할 수 없습니다.');
-      }
-      betAmount = 0;
-      break;
-      
-    case 'call':
-      // 이전 베팅액과 동일하게
-      betAmount = lastBetAction?.amount || baseBet;
-      break;
-      
-    case 'half':
-      // 팟의 절반
-      betAmount = Math.floor(gameState.bettingValue / 2);
-      // 최소 기본 배팅액 보장
-      betAmount = betAmount < baseBet ? baseBet : betAmount;
-      break;
-      
-    case 'bet':
-    case 'raise':
-      // 사용자가 지정한 금액
-      if (!amount || amount <= 0) {
-        throw new Error('베팅 금액은 0보다 커야 합니다.');
-      }
-      
-      // 최소 베팅액 확인
-      const minBet = lastBetAction ? lastBetAction.amount * 2 : baseBet;
-      if (amount < minBet) {
-        throw new Error(`최소 베팅액은 ${minBet}입니다.`);
-      }
-      
-      // 최대 베팅액 (올인 이외)은 보유량
-      betAmount = amount;
-      break;
-      
-    case 'die':
-      // 다이는 비용 없음
-      betAmount = 0;
-      break;
-      
-    default:
-      throw new Error('잘못된 액션 타입입니다.');
-  }
-  
-  // 잔액 확인
-  if (actionType !== 'die' && player.balance < betAmount) {
-    throw new Error('잔액이 부족합니다.');
-  }
-  
-  // 액션 처리
-  if (actionType === 'die') {
-    // 플레이어를 다이 상태로 변경
-    const { error: playerUpdateError } = await supabase
-      .from('players')
-      .update({
-        is_die: true
-      })
-      .eq('id', playerId);
-    
-    if (playerUpdateError) {
-      console.error('플레이어 다이 상태 업데이트 오류:', playerUpdateError);
-      throw new Error('다이할 수 없습니다.');
-    }
-    
-    // 남은 플레이어 확인
-    const activePlayers = gameState.players.filter(p => p.id !== playerId && !p.isDie);
-    
-    if (activePlayers.length === 1) {
-      // 한 명만 남았으면 게임 종료
-      const winner = activePlayers[0].id;
-
-      // 승자의 잔액 업데이트
-      const { error: winnerUpdateError } = await supabase
-        .from('players')
-        .update({
-          balance: activePlayers[0].balance + gameState.bettingValue
-        })
-        .eq('id', winner);
-      
-      if (winnerUpdateError) {
-        console.error('승자 잔액 업데이트 오류:', winnerUpdateError);
-        throw new Error('승자 잔액을 업데이트할 수 없습니다.');
-      }
-      
-      // 게임 종료 상태 업데이트
-      const { error: gameUpdateError } = await supabase
-            .from('games')
-            .update({
-              status: 'finished',
-          winner: winner
-            })
-            .eq('id', gameId);
-      
-      if (gameUpdateError) {
-        console.error('게임 종료 상태 업데이트 오류:', gameUpdateError);
-        throw new Error('게임을 종료할 수 없습니다.');
-      }
-      
-      // 액션 기록
-      await recordGameAction(gameId, 'die', playerId);
-      return;
-    } else {
-      // 다음 플레이어 결정
-      const nextPlayerTurnId = getNextPlayerTurn(gameState.players, playerId);
-
-      // 게임 상태 업데이트
-      const { error: gameUpdateError } = await supabase
-        .from('games')
-        .update({
-          current_turn: nextPlayerTurnId
-        })
-        .eq('id', gameId);
-      
-      if (gameUpdateError) {
-        console.error('게임 상태 업데이트 오류:', gameUpdateError);
-        throw new Error('게임 상태를 업데이트할 수 없습니다.');
-      }
-      
-      // 액션 기록
-      await recordGameAction(gameId, 'die', playerId);
-      return;
-    }
-  }
-  
-  // 다음 플레이어 결정
-  const nextPlayerTurnId = getNextPlayerTurn(gameState.players, playerId);
-
-  // 게임 상태 업데이트
-  const { error: gameUpdateError } = await supabase
-    .from('games')
-    .update({
-      current_turn: nextPlayerTurnId,
-      betting_value: gameState.bettingValue + betAmount
-    })
-    .eq('id', gameId);
-  
-  if (gameUpdateError) {
-    console.error('게임 상태 업데이트 오류:', gameUpdateError);
-    throw new Error('베팅할 수 없습니다.');
-  }
-  
-  // 플레이어 잔액 업데이트
-  if (betAmount > 0) {
-    const { error: playerUpdateError } = await supabase
-      .from('players')
-      .update({
-        balance: player.balance - betAmount
-      })
-      .eq('id', playerId);
-    
-    if (playerUpdateError) {
-      console.error('플레이어 잔액 업데이트 오류:', playerUpdateError);
-      throw new Error('잔액을 업데이트할 수 없습니다.');
-    }
-  }
-  
-  // 모든 플레이어가 액션을 취했는지 확인
-  const allPlayersTookAction = await checkAllPlayersHadTurn(gameId, gameState.players);
-  const allPlayersMatchedBet = await checkAllPlayersMatchedBet(gameId, gameState.players);
-  
-  // 모든 플레이어가 액션을 취했고, 배팅 금액이 일치하면 게임 종료
-  if (allPlayersTookAction && allPlayersMatchedBet) {
-    console.log('모든 플레이어 액션 완료, 베팅 금액 일치 - 게임 종료');
-    await finishGame(gameId);
-  } else {
-    // 디버그 로그
-    if (!allPlayersTookAction) {
-      console.log('아직 모든 플레이어가 액션을 취하지 않음');
-    }
-    if (!allPlayersMatchedBet) {
-      console.log('플레이어들의 베팅 금액이 일치하지 않음');
-    }
-  }
-  
-  // 액션 기록
-  await recordGameAction(gameId, actionType, playerId, betAmount);
 }
 
 // 모든 플레이어가 동일한 금액을 배팅했는지 확인
@@ -540,7 +513,7 @@ function getNextPlayerTurn(players: Player[], currentPlayerId: string): string {
  */
 export async function sendMessage(gameId: string, playerId: string, content: string): Promise<void> {
   if (!content.trim()) {
-    throw new Error('메시지 내용이 비어있습니다.');
+    throw handleGameError(null, ErrorType.INVALID_ACTION, 'sendMessage');
   }
   
   // 플레이어 정보 가져오기
@@ -551,8 +524,7 @@ export async function sendMessage(gameId: string, playerId: string, content: str
     .single();
   
   if (playerError || !playerData) {
-    console.error('플레이어 정보 조회 오류:', playerError);
-    throw new Error('플레이어 정보를 찾을 수 없습니다.');
+    throw handleResourceNotFoundError('player', playerId, playerError);
   }
 
   // 메시지 ID 생성
@@ -575,8 +547,7 @@ export async function sendMessage(gameId: string, playerId: string, content: str
     .insert(messageData);
   
   if (messageError) {
-    console.error('메시지 저장 오류:', messageError);
-    throw new Error('메시지를 전송할 수 없습니다: ' + messageError.message);
+    throw handleDatabaseError(messageError, 'sendMessage');
   }
 }
 
@@ -585,23 +556,31 @@ export async function sendMessage(gameId: string, playerId: string, content: str
  */
 async function recordGameAction(
   gameId: string,
-  actionType: BetActionType | 'show' | 'start' | 'regame',
+  actionType: BetActionType | 'show' | 'start' | 'regame' | 'draw_card' | 'select_cards',
   playerId: string | null,
-  amount?: number
+  amount?: number,
+  bettingRound?: number
 ): Promise<void> {
-  const { error } = await supabase
-    .from('game_actions')
-    .insert({
-      game_id: gameId,
-      player_id: playerId,
-      action_type: actionType,
-      amount: amount
-    });
+  try {
+    const id = uuidv4();
+    const { error } = await supabase
+      .from('game_actions')
+      .insert({
+        id,
+        game_id: gameId,
+        action_type: actionType,
+        player_id: playerId,
+        amount,
+        betting_round: bettingRound,
+        created_at: new Date().toISOString()
+      });
 
-  if (error) {
-    console.error('게임 액션 기록 오류:', error);
-    // 액션 기록 실패는 게임 진행에 치명적이지 않으므로 오류를 던지지 않음
-    console.warn('게임 액션을 기록할 수 없습니다.');
+    if (error) {
+      throw handleDatabaseError(error, 'Recording game action');
+    }
+  } catch (error) {
+    console.error('Error recording game action:', error);
+    throw handleGameError(error, ErrorType.GAME_ACTION_ERROR, 'Failed to record game action');
   }
 }
 
@@ -672,157 +651,233 @@ async function checkAllPlayersHadTurn(gameId: string, players: Player[]): Promis
 }
 
 /**
- * 게임 종료 처리
+ * 게임 종료 시 승자 판정 및 상태 업데이트
  */
-async function finishGame(gameId: string): Promise<void> {
-  // 게임 상태 조회
-  const gameState = await getGameState(gameId);
-  
-  // 활성 플레이어 (다이하지 않은 플레이어 중 카드가 있는 플레이어)
-  const activePlayers = gameState.players
-    .filter(p => !p.isDie && p.cards && p.cards.length === 2)
-    .map(p => ({
-      id: p.id,
-      cards: p.cards as number[],
-      isDie: p.isDie || false
-    }));
-  
-  if (activePlayers.length === 0) {
-    console.error('활성 플레이어가 없습니다');
-    return;
-  }
-  
-  // 승자 결정
-  const { winnerId, isRegame } = determineWinner(activePlayers);
-  
-  // 재경기 처리
-  if (isRegame) {
-    await handleRegame(gameId);
-    return;
-  }
-  
-  if (!winnerId) {
-    console.log('승자를 결정할 수 없음 (구사 등의 특수 상황)');
-    return;
-  }
-  
-  // 승자 찾기
-  const winner = gameState.players.find(p => p.id === winnerId);
-  if (!winner) {
-    console.error('승자 정보를 찾을 수 없음');
-    return;
-  }
-  
-  // 땡값 계산 처리
-  let winnings = gameState.bettingValue;
-  let dangValues: Record<string, number> = {};
-  
-  // 활성 플레이어 중 패자들 확인
-  for (const player of gameState.players.filter(p => !p.isDie && p.id !== winnerId)) {
-    // 승자 패 확인
-    const winnerEval = evaluateCards(winner.cards || []);
-    // 패자 패 확인
-    const loserEval = evaluateCards(player.cards || []);
-    
-    // 땡값 계산 - 승자가 땡잡이고 패자가 땡일 경우
-    if (winnerEval.rank === '땡잡이' && loserEval.rank.includes('땡') && 
-       !loserEval.rank.includes('광땡') && loserEval.rank !== '10땡') {
-      const dangValue = calculateDangValue(loserEval.rank, gameState.bettingValue);
-      dangValues[player.id] = dangValue;
-      winnings += dangValue;
+export async function finishGame(gameId: string): Promise<void> {
+  try {
+    // 게임 정보 조회
+    const { data: gameData, error: gameError } = await supabase
+      .from('games')
+      .select('*, rooms(*)')
+      .eq('id', gameId)
+      .single();
+
+    if (gameError || !gameData) {
+      throw handleResourceNotFoundError('game', gameId, gameError);
     }
-    
-    // 암행어사와 광땡 처리
-    if (winnerEval.rank === '암행어사' && 
-       (loserEval.rank === '13광땡' || loserEval.rank === '18광땡')) {
-      // 광땡에 대한 암행어사 배당 (일반적으로 3배)
-      const amhaengValue = gameState.bettingValue * 3;
-      dangValues[player.id] = amhaengValue;
-      winnings += amhaengValue;
+
+    // 방 정보와 게임 모드 확인
+    const roomData = gameData.rooms;
+    const gameMode = roomData.mode;
+
+    // 생존한 플레이어 정보 조회
+    const { data: playersData, error: playersError } = await supabase
+      .from('players')
+      .select('*')
+      .eq('game_id', gameId)
+      .eq('is_die', false);
+
+    if (playersError || !playersData || playersData.length === 0) {
+      throw handleDatabaseError(playersError, 'finishGame');
     }
-    
-    // 38광땡이 다른 광땡을 이겼을 경우 (상위 광땡이 하위 광땡 배당)
-    if (winnerEval.rank === '38광땡' && 
-       (loserEval.rank === '13광땡' || loserEval.rank === '18광땡')) {
-      const gwangDangValue = gameState.bettingValue * 2;
-      dangValues[player.id] = gwangDangValue;
-      winnings += gwangDangValue;
+
+    // 생존한 플레이어가 한 명만 있다면 자동 승리
+    if (playersData.length === 1) {
+      await updateGameResult(gameId, playersData[0].id);
+      return;
     }
-  }
-  
-  // 승자의 잔액 업데이트
-  const { error: winnerUpdateError } = await supabase
-    .from('players')
-    .update({
-      balance: winner.balance + winnings
-    })
-    .eq('id', winnerId);
-  
-  if (winnerUpdateError) {
-    console.error('승자 잔액 업데이트 오류:', winnerUpdateError);
-    throw new Error('승자 잔액을 업데이트할 수 없습니다.');
-  }
-  
-  // 땡값이 있다면 패자들의 잔액 추가 차감
-  for (const [playerId, dangValue] of Object.entries(dangValues)) {
-    const loser = gameState.players.find(p => p.id === playerId);
-    if (loser) {
-      const { error: loserUpdateError } = await supabase
-        .from('players')
+
+    // 게임 모드에 따라 승자 결정 로직이 달라짐
+    let playerResults: { playerId: string, score: number, rank: string, cards: number[] }[] = [];
+
+    if (gameMode === 2) {
+      // 2장 모드: 기본 승자 판정 로직 사용
+      playerResults = playersData.map(player => {
+        const evaluation = evaluateCards(player.cards);
+        return {
+          playerId: player.id,
+          score: evaluation.value,
+          rank: evaluation.rank,
+          cards: player.cards
+        };
+      });
+    } else if (gameMode === 3) {
+      // 3장 모드: 선택한 카드를 사용하거나, 선택하지 않았다면 최적의 조합 찾기
+      playerResults = playersData.map(player => {
+        let cardsToEvaluate: number[];
+        
+        if (player.selected_cards && player.selected_cards.length === 2) {
+          // 플레이어가 직접 선택한 카드 사용
+          cardsToEvaluate = player.selected_cards;
+        } else {
+          // 선택하지 않았다면 최적의 조합을 자동으로 찾기
+          cardsToEvaluate = findBestCombination(player.cards);
+        }
+        
+        const evaluation = evaluateCards(cardsToEvaluate);
+        return {
+          playerId: player.id,
+          score: evaluation.value,
+          rank: evaluation.rank,
+          cards: cardsToEvaluate
+        };
+      });
+    }
+
+    // 점수순으로 정렬
+    playerResults.sort((a, b) => b.score - a.score);
+
+    // 승자 확인 (동점이면 무승부 처리 필요)
+    const winner = playerResults[0];
+    const secondPlace = playerResults[1];
+    
+    // 동점일 경우 당월로 처리
+    const isDraw = winner.score === secondPlace.score;
+    
+    if (isDraw) {
+      // 당월시 배팅금액 되돌리고 재게임 준비
+      await supabase
+        .from('games')
         .update({
-          balance: Math.max(0, loser.balance - dangValue) // 최소 0으로 제한
+          status: 'draw',
+          winner: null
         })
-        .eq('id', playerId);
+        .eq('id', gameId);
+
+      // 게임 액션 기록
+      await recordGameAction(gameId, 'regame', null);
       
-      if (loserUpdateError) {
-        console.error('패자 잔액 업데이트 오류:', loserUpdateError);
+      console.log(`게임 ${gameId} 동점으로 당월`);
+    } else {
+      // 승자 업데이트
+      const totalPot = gameData.total_pot || 0;
+      
+      // 승자 잔액 업데이트
+      const { data: winnerData, error: winnerQueryError } = await supabase
+        .from('players')
+        .select('balance')
+        .eq('id', winner.playerId)
+        .single();
+        
+      if (winnerQueryError) {
+        console.error('승자 정보 조회 오류:', winnerQueryError);
+        throw handleDatabaseError(winnerQueryError, 'finishGame');
       }
+      
+      const { error: balanceError } = await supabase
+        .from('players')
+        .update({ 
+          balance: (winnerData.balance || 0) + totalPot 
+        })
+        .eq('id', winner.playerId);
+      
+      if (balanceError) {
+        console.error('승자 잔액 업데이트 오류:', balanceError);
+        throw handleDatabaseError(balanceError, 'finishGame');
+      }
+      
+      // 게임 상태 업데이트
+      await supabase
+        .from('games')
+        .update({
+          status: 'finished',
+          winner: winner.playerId,
+          winning_cards: winner.cards,
+          winning_rank: winner.rank
+        })
+        .eq('id', gameId);
+      
+      // 게임 액션 기록
+      await recordGameAction(gameId, 'show', winner.playerId);
+      
+      console.log(`게임 ${gameId} 승자: ${winner.playerId} (${winner.rank})`);
     }
+
+  } catch (error) {
+    console.error('게임 종료 처리 중 오류 발생:', error);
+    throw error;
   }
-  
-  // 게임 상태 업데이트
-  const { error: gameUpdateError } = await supabase
-    .from('games')
-    .update({
-      status: 'finished',
-      winner: winnerId,
-      show_cards: true,
-      dang_values: dangValues
-    })
-    .eq('id', gameId);
-  
-  if (gameUpdateError) {
-    console.error('게임 종료 상태 업데이트 오류:', gameUpdateError);
-    throw new Error('게임을 종료할 수 없습니다.');
-  }
-  
-  // 결과 액션 기록
-  await recordGameAction(gameId, 'show', winnerId);
 }
 
-// 땡값 계산 함수
-function calculateDangValue(rank: string, bettingValue: number): number {
-  // 광땡 배당
-  if (rank === '38광땡') return bettingValue * 10;
-  if (rank === '13광땡') return bettingValue * 8;
-  if (rank === '18광땡') return bettingValue * 7;
-  
-  // 일반 땡 배당
-  if (rank === '10땡' || rank === '장땡') return bettingValue * 5;
-  if (rank === '9땡') return bettingValue * 4.5;
-  if (rank === '8땡') return bettingValue * 4;
-  if (rank === '7땡') return bettingValue * 3.5;
-  if (rank === '6땡') return bettingValue * 3;
-  if (rank === '5땡') return bettingValue * 2.5;
-  if (rank === '4땡') return bettingValue * 2;
-  if (rank === '3땡') return bettingValue * 1.5;
-  if (rank === '2땡') return bettingValue * 1.25;
-  if (rank === '1땡') return bettingValue * 1;
-  
-  // 특수 조합 배당
-  if (rank === '암행어사') return bettingValue * 3; // 광땡 잡았을 때
-  
-  return 0; // 땡이 아닌 경우
+/**
+ * 게임 승자 업데이트
+ */
+async function updateGameResult(gameId: string, winnerId: string): Promise<void> {
+  try {
+    // 게임 정보 조회
+    const { data: gameData, error: gameError } = await supabase
+      .from('games')
+      .select('*, rooms(*)')
+      .eq('id', gameId)
+      .single();
+
+    if (gameError || !gameData) {
+      throw handleResourceNotFoundError('game', gameId, gameError);
+    }
+    
+    // 승자 정보 조회
+    const { data: winnerData, error: winnerError } = await supabase
+      .from('players')
+      .select('*')
+      .eq('id', winnerId)
+      .single();
+
+    if (winnerError || !winnerData) {
+      throw handleResourceNotFoundError('player', winnerId, winnerError);
+    }
+    
+    // 승자 카드 평가
+    const cardsToEvaluate = gameData.rooms.mode === 3 && winnerData.selected_cards && winnerData.selected_cards.length === 2 ?
+      winnerData.selected_cards : winnerData.cards;
+      
+    const evaluation = evaluateCards(cardsToEvaluate);
+    
+    // 총 상금
+    const totalPot = gameData.total_pot || 0;
+    
+    // 승자 잔액 업데이트
+    const { data: winnerBalanceData, error: winnerBalanceError } = await supabase
+      .from('players')
+      .select('balance')
+      .eq('id', winnerId)
+      .single();
+        
+    if (winnerBalanceError) {
+      console.error('승자 정보 조회 오류:', winnerBalanceError);
+      throw handleDatabaseError(winnerBalanceError, 'updateGameResult');
+    }
+      
+    const { error: balanceError } = await supabase
+      .from('players')
+      .update({ 
+        balance: (winnerBalanceData.balance || 0) + totalPot 
+      })
+      .eq('id', winnerId);
+    
+    if (balanceError) {
+      console.error('승자 잔액 업데이트 오류:', balanceError);
+      throw handleDatabaseError(balanceError, 'updateGameResult');
+    }
+    
+    // 게임 상태 업데이트
+    await supabase
+      .from('games')
+      .update({
+        status: 'finished',
+        winner: winnerId,
+        winning_cards: cardsToEvaluate,
+        winning_rank: evaluation.rank
+      })
+      .eq('id', gameId);
+    
+    // 게임 액션 기록
+    await recordGameAction(gameId, 'show', winnerId);
+    
+    console.log(`게임 ${gameId} 승자: ${winnerId} (${evaluation.rank})`);
+  } catch (error) {
+    console.error('게임 결과 업데이트 중 오류 발생:', error);
+    throw error;
+  }
 }
 
 // 재경기 처리 함수
@@ -855,7 +910,7 @@ async function handleRegame(gameId: string): Promise<void> {
   
   if (gameUpdateError) {
     console.error('재경기 설정 오류:', gameUpdateError);
-    throw new Error('재경기를 설정할 수 없습니다.');
+    throw handleDatabaseError(gameUpdateError, 'handleRegame');
   }
   
   // 재경기 액션 기록
@@ -901,12 +956,12 @@ export async function updateSeat(gameId: string, playerId: string, seatIndex: nu
 
     if (checkError) {
       console.error('좌석 확인 오류:', checkError);
-      throw new Error('좌석 정보를 확인할 수 없습니다.');
+      throw handleDatabaseError(checkError, 'updateSeat');
     }
 
     // 이미 다른 플레이어가 해당 좌석에 앉아있으면 오류
     if (existingPlayer && existingPlayer.length > 0 && existingPlayer[0].id !== playerId) {
-      throw new Error('이미 다른 플레이어가 사용 중인 좌석입니다.');
+      throw handleGameError(null, ErrorType.INVALID_STATE, 'updateSeat');
     }
 
     // 플레이어 좌석 업데이트
@@ -918,10 +973,618 @@ export async function updateSeat(gameId: string, playerId: string, seatIndex: nu
 
     if (updateError) {
       console.error('좌석 업데이트 오류:', updateError);
-      throw new Error('좌석을 업데이트할 수 없습니다: ' + updateError.message);
+      throw handleDatabaseError(updateError, 'updateSeat');
     }
   } catch (err) {
     console.error('좌석 업데이트 중 예외 발생:', err);
     throw err;
   }
 } 
+
+/**
+ * 베팅 라운드 종료 및 시작
+ */
+export async function finishBettingRound(gameId: string): Promise<void> {
+  try {
+    console.log(`게임 ${gameId}: 베팅 라운드 종료`);
+    
+    // 게임 정보 조회
+    const { data: gameData, error: gameError } = await supabase
+      .from('games')
+      .select('*, rooms(*), players(*)')
+      .eq('id', gameId)
+      .single();
+    
+    if (gameError || !gameData) {
+      console.error('게임 정보 조회 오류:', gameError);
+      throw handleResourceNotFoundError('game', gameId, gameError);
+    }
+    
+    // 생존한 플레이어만 필터링
+    const activePlayers = gameData.players.filter((p: any) => !p.is_die);
+    
+    // 생존 플레이어가 1명 이하면 게임 종료
+    if (activePlayers.length <= 1) {
+      await finishGame(gameId);
+      return;
+    }
+    
+    // 게임 모드 확인 (2장 또는 3장)
+    const gameMode = gameData.rooms?.mode || 2;
+    
+    // 현재 베팅 라운드 확인
+    const currentBettingRound = gameData.betting_round || 1;
+    
+    // 모드에 따른 처리
+    if (gameMode === 2) {
+      // 2장 모드에서는 베팅 라운드가 끝나면 게임 종료
+      await finishGame(gameId);
+      return;
+    } else if (gameMode === 3) {
+      // 3장 모드 처리
+      if (currentBettingRound === 1) {
+        // 첫 번째 베팅 라운드가 끝나면 3번째 카드 배분 및 공개 카드 설정
+        
+        // 덱에서 추가 카드 가져오기
+        const deck = createShuffledDeck();
+        
+        // 공개 카드 배분 및 데이터베이스 업데이트
+        for (const player of activePlayers) {
+          if (!player.cards || player.cards.length < 2) {
+            console.error(`플레이어 ${player.id}의 카드가 없습니다.`);
+            continue;
+          }
+          
+          const thirdCard = deck.pop();
+          if (!thirdCard) {
+            console.error('덱에 카드가 부족합니다.');
+            break;
+          }
+          
+          // 기존 카드에 새 카드 추가
+          const updatedCards = [...player.cards, thirdCard];
+          
+          // 플레이어 카드 업데이트
+          await supabase
+            .from('players')
+            .update({
+              cards: updatedCards,
+              open_card: thirdCard // 세 번째 카드는 공개
+            })
+            .eq('id', player.id);
+          
+          // 게임 액션 기록
+          await recordGameAction(gameId, 'draw_card', player.id);
+        }
+        
+        // 게임 상태 업데이트
+        await supabase
+          .from('games')
+          .update({
+            betting_round: 2,
+            current_turn: activePlayers[0].id,
+            betting_value: 0, // 새 라운드에서는 베팅값 초기화
+            betting_end_time: new Date(Date.now() + BETTING_TIME_LIMIT_MS).toISOString() // 베팅 시간 제한 초기화
+          })
+          .eq('id', gameId);
+        
+        console.log(`게임 ${gameId}: 두 번째 베팅 라운드 시작, 공개 카드 배분`);
+        
+        // 다음 플레이어 베팅 시간 타이머 설정
+        setTimeout(async () => {
+          try {
+            // 게임 상태 다시 확인 (중간에 베팅이 완료되었을 수 있음)
+            const { data: currentGame, error: currentGameError } = await supabase
+              .from('games')
+              .select('status, current_turn, betting_end_time, betting_round')
+              .eq('id', gameId)
+              .single();
+            
+            if (currentGameError) {
+              console.error('게임 상태 확인 중 오류:', currentGameError);
+              return;
+            }
+            
+            // 게임이 진행 중이고 베팅 라운드가 2이며 베팅 시간이 만료된 경우
+            if (currentGame && currentGame.status === 'playing' && 
+                currentGame.betting_round === 2 && 
+                currentGame.current_turn === activePlayers[0].id && 
+                new Date(currentGame.betting_end_time) <= new Date()) {
+              console.log(`게임 ${gameId}: 베팅 타임아웃, 자동 폴드 처리`);
+              await handleBettingTimeout(gameId);
+            }
+          } catch (err) {
+            console.error('베팅 타이머 처리 중 오류:', err);
+          }
+        }, BETTING_TIME_LIMIT_MS);
+        
+      } else if (currentBettingRound === 2) {
+        // 두 번째 베팅 라운드가 끝나면 최종 카드 선택 단계로 전환
+        await supabase
+          .from('games')
+          .update({
+            betting_round: 3,
+            card_selection_end_time: new Date(Date.now() + CARD_SELECTION_TIME_LIMIT_MS).toISOString() // 카드 선택 시간 설정
+          })
+          .eq('id', gameId);
+
+        console.log(`게임 ${gameId}: 카드 선택 단계 시작`);
+        
+        // 카드 선택 시간 타이머 설정
+        setTimeout(async () => {
+          try {
+            // 게임 상태 확인
+            const { data: currentGame, error: currentGameError } = await supabase
+              .from('games')
+              .select('status, betting_round, card_selection_end_time')
+              .eq('id', gameId)
+              .single();
+            
+            if (currentGameError) {
+              console.error('게임 상태 확인 중 오류:', currentGameError);
+              return;
+            }
+            
+            // 게임이 아직 진행 중이고 카드 선택 단계인 경우에만 처리
+            if (currentGame && currentGame.status === 'playing' && 
+                currentGame.betting_round === 3 && 
+                new Date(currentGame.card_selection_end_time) <= new Date()) {
+              console.log(`게임 ${gameId}: 카드 선택 시간 종료, 자동 선택 실행`);
+              await autoSelectFinalCards(gameId);
+            }
+          } catch (err) {
+            console.error('카드 선택 타이머 처리 중 오류:', err);
+          }
+        }, CARD_SELECTION_TIME_LIMIT_MS);
+        
+      } else if (currentBettingRound === 3) {
+        // 카드 선택 단계가 끝나면 게임 종료
+        await finishGame(gameId);
+      }
+    }
+  } catch (error) {
+    console.error('베팅 라운드 종료 중 오류:', error);
+    throw error;
+  }
+}
+
+/**
+ * 3장 모드에서 최종 카드 선택
+ */
+export async function selectFinalCards(
+  gameId: string,
+  playerId: string,
+  selectedCards: number[]
+): Promise<void> {
+  try {
+    // 선택한 카드 유효성 확인
+    if (!selectedCards || selectedCards.length !== 2) {
+      throw handleGameError(null, ErrorType.INVALID_ACTION, 'selectFinalCards');
+    }
+
+    // 플레이어 정보 조회
+    const { data: playerData, error: playerError } = await supabase
+      .from('players')
+      .select('*')
+      .eq('id', playerId)
+      .eq('game_id', gameId)
+      .single();
+
+    if (playerError || !playerData) {
+      throw handleResourceNotFoundError('player', playerId, playerError);
+    }
+
+    // 선택한 카드가 플레이어의 카드인지 확인
+    const isValidSelection = selectedCards.every(card => playerData.cards.includes(card));
+    if (!isValidSelection) {
+      throw handleGameError(null, ErrorType.INVALID_ACTION, 'selectFinalCards');
+    }
+
+    // 선택한 카드 저장
+    await supabase
+      .from('players')
+      .update({ selected_cards: selectedCards })
+      .eq('id', playerId);
+
+    console.log(`플레이어 ${playerId}의 카드가 선택됨: ${selectedCards.join(', ')}`);
+
+    // 게임 액션 기록
+    await recordGameAction(gameId, 'show', playerId);
+
+    // 모든 플레이어가 카드를 선택했는지 확인
+    const { data: allPlayers, error: allPlayersError } = await supabase
+      .from('players')
+      .select('*')
+      .eq('game_id', gameId)
+      .eq('is_die', false);
+
+    if (allPlayersError || !allPlayers) {
+      throw handleDatabaseError(allPlayersError, 'selectFinalCards');
+    }
+
+    const allSelected = allPlayers.every(
+      (p: any) => p.id === playerId || p.selected_cards && p.selected_cards.length === 2
+    );
+    
+    // 모든 플레이어가 카드를 선택했으면 게임 종료
+    if (allSelected) {
+      await finishGame(gameId);
+    }
+  } catch (error) {
+    console.error('카드 선택 중 오류:', error);
+    throw error;
+  }
+}
+
+/**
+ * 카드 선택 시간이 종료되면 자동으로 최적 카드 선택
+ */
+export async function autoSelectFinalCards(gameId: string): Promise<void> {
+  try {
+    // 게임 정보 조회
+    const { data: gameData, error: gameError } = await supabase
+      .from('games')
+      .select('*')
+      .eq('id', gameId)
+      .single();
+
+    if (gameError || !gameData) {
+      throw handleResourceNotFoundError('game', gameId, gameError);
+    }
+
+    // 아직 카드를 선택하지 않은 활성 플레이어들 조회
+    const { data: pendingPlayers, error: pendingError } = await supabase
+      .from('players')
+      .select('*')
+      .eq('game_id', gameId)
+      .eq('is_die', false)
+      .is('selected_cards', null);
+
+    if (pendingError) {
+      throw handleDatabaseError(pendingError, 'autoSelectFinalCards');
+    }
+
+    // 각 플레이어에 대해 최적의 카드 조합 선택
+    for (const player of (pendingPlayers || [])) {
+      if (player.cards && player.cards.length === 3) {
+        const bestCards = findBestCombination(player.cards);
+        
+        await supabase
+          .from('players')
+          .update({ selected_cards: bestCards })
+          .eq('id', player.id);
+
+        console.log(`플레이어 ${player.id}의 카드가 자동 선택됨: ${bestCards.join(', ')}`);
+      }
+    }
+
+    // 모든 카드 선택이 완료되었으므로 게임 종료 처리
+    await finishGame(gameId);
+  } catch (error) {
+    console.error('자동 카드 선택 중 오류:', error);
+    throw error;
+  }
+}
+
+/**
+ * 베팅 타임아웃 처리
+ * 지정된 시간내에 플레이어가 베팅을 하지 않으면 자동으로 폴드 처리
+ */
+export async function handleBettingTimeout(gameId: string): Promise<void> {
+  try {
+    // 게임 상태 확인
+    const { data: game, error: gameError } = await supabase
+      .from('games')
+      .select('status, current_turn, betting_end_time, betting_round')
+      .eq('id', gameId)
+      .single();
+    
+    if (gameError) {
+      throw handleDatabaseError(gameError, 'handleBettingTimeout');
+    }
+    
+    // 게임이 플레이 중이 아니거나, 현재 턴 플레이어가 없으면 처리 중단
+    if (game.status !== 'playing' || !game.current_turn) {
+      return;
+    }
+    
+    // 베팅 타임아웃 시간이 지났는지 확인
+    const currentTime = new Date().getTime();
+    const bettingEndTime = new Date(game.betting_end_time).getTime();
+    
+    if (currentTime < bettingEndTime) {
+      return; // 아직 타임아웃되지 않음
+    }
+    
+    // 현재 턴 플레이어 정보 조회
+    const { data: currentPlayer, error: playerError } = await supabase
+      .from('players')
+      .select('*')
+      .eq('id', game.current_turn)
+      .eq('game_id', gameId)
+      .single();
+    
+    if (playerError) {
+      throw handleDatabaseError(playerError, 'handleBettingTimeout - 현재 플레이어 조회');
+    }
+    
+    // 타임아웃된 플레이어 자동 폴드 처리
+    console.log(`${currentPlayer.username}의 베팅 시간 초과, 자동 폴드 처리`); 
+    
+    // 타임아웃 로그 기록
+    await logTimeout(gameId, currentPlayer.id, '베팅');
+    
+    // 액션 기록
+    await recordGameAction(gameId, 'die', currentPlayer.id, 0, game.betting_round);
+    
+    // 플레이어 상태 업데이트 (폴드)
+    await supabase
+      .from('players')
+      .update({ is_die: true })
+      .eq('id', currentPlayer.id)
+      .eq('game_id', gameId);
+    
+    // 다음 플레이어 구하기
+    const { data: players, error: playersError } = await supabase
+      .from('players')
+      .select('*')
+      .eq('game_id', gameId)
+      .order('seat_index', { ascending: true });
+    
+    if (playersError) {
+      throw handleDatabaseError(playersError, 'handleBettingTimeout - 전체 플레이어 조회');
+    }
+    
+    // 폴드하지 않은 플레이어만 필터링
+    const activePlayers = players.filter(p => !p.is_die);
+    
+    // 활성 플레이어가 1명 이하면 게임 종료
+    if (activePlayers.length <= 1) {
+      await finishGame(gameId);
+      return;
+    }
+    
+    // 다음 턴 플레이어 설정
+    const nextPlayerId = getNextPlayerTurn(activePlayers, currentPlayer.id);
+    
+    // 새로운 베팅 종료 시간 설정
+    const newBettingEndTime = new Date(currentTime + BETTING_TIME_LIMIT_MS);
+    
+    // 게임 상태 업데이트
+    await supabase
+      .from('games')
+      .update({
+        current_turn: nextPlayerId,
+        betting_end_time: newBettingEndTime.toISOString()
+      })
+      .eq('id', gameId);
+      
+  } catch (error: any) {
+    console.error('베팅 타임아웃 처리 중 오류:', error);
+    await logSystemError(gameId, 'handleBettingTimeout', error);
+  }
+}
+
+/**
+ * 베팅 액션 수행 (베팅, 콜, 레이즈, 폴드)
+ */
+export async function betAction(
+  gameId: string,
+  playerId: string,
+  action: BetActionType,
+  amount: number
+): Promise<void> {
+  try {
+    // 게임 정보 조회
+    const { data: gameData, error: gameError } = await supabase
+      .from('games')
+      .select('*, players(*)')
+      .eq('id', gameId)
+      .single();
+
+    if (gameError || !gameData) {
+      throw handleResourceNotFoundError('game', gameId, gameError);
+    }
+
+    // 게임이 진행 중인지 확인
+    if (gameData.status !== 'playing') {
+      throw handleGameError(null, ErrorType.INVALID_STATE, 'betAction');
+    }
+
+    // 현재 차례인지 확인
+    if (gameData.current_turn !== playerId) {
+      throw handleGameError(null, ErrorType.INVALID_TURN, 'betAction');
+    }
+
+    // 플레이어 정보 찾기
+    const player = gameData.players.find((p: any) => p.id === playerId);
+    if (!player) {
+      throw handleResourceNotFoundError('player', playerId);
+    }
+
+    // 생존한 플레이어들 찾기
+    const activePlayers = gameData.players.filter((p: any) => !p.is_die);
+    if (activePlayers.length <= 1) {
+      // 한 명만 남았으면 게임 종료
+      await finishGame(gameId);
+      return;
+    }
+
+    // 액션에 따른 처리
+    const currentBettingValue = gameData.betting_value || 0;
+    const totalPot = gameData.total_pot || 0;
+    
+    let newBettingValue = currentBettingValue;
+    let playerBet = 0;
+    let isPlayerDie = false;
+
+    switch (action) {
+      case 'bet':
+        // 첫 베팅
+        if (currentBettingValue > 0) {
+          throw handleGameError(null, ErrorType.INVALID_ACTION, 'betAction');
+        }
+        
+        if (amount <= 0) {
+          throw handleGameError(null, ErrorType.INVALID_ACTION, 'betAction');
+        }
+        
+        playerBet = amount;
+        newBettingValue = amount;
+        break;
+        
+      case 'call':
+        // 콜: 현재 베팅 금액에 맞추기
+        if (currentBettingValue <= 0) {
+          throw handleGameError(null, ErrorType.INVALID_ACTION, 'betAction');
+        }
+        
+        playerBet = currentBettingValue;
+        break;
+        
+      case 'raise':
+        // 레이즈: 현재 베팅 금액보다 더 큰 금액으로 베팅
+        if (currentBettingValue <= 0) {
+          throw handleGameError(null, ErrorType.INVALID_ACTION, 'betAction');
+        }
+        
+        if (amount <= currentBettingValue) {
+          throw handleGameError(null, ErrorType.INVALID_ACTION, 'betAction');
+        }
+        
+        playerBet = amount;
+        newBettingValue = amount;
+        break;
+        
+      case 'die':
+        // 폴드: 게임에서 포기
+        isPlayerDie = true;
+        break;
+        
+      case 'check':
+        // 체크: 현재 베팅액에 동의
+        if (currentBettingValue > 0) {
+          throw handleGameError(null, ErrorType.INVALID_ACTION, 'betAction');
+        }
+        playerBet = 0;
+        break;
+        
+      case 'half':
+        // 하프: 현재 총액의 절반 베팅
+        playerBet = Math.floor(totalPot / 2);
+        if (playerBet <= 0) playerBet = 1; // 최소 1
+        newBettingValue = playerBet;
+        break;
+        
+      case 'quarter':
+        // 쿼터: 현재 총액의 4분의 1 베팅
+        playerBet = Math.floor(totalPot / 4);
+        if (playerBet <= 0) playerBet = 1; // 최소 1
+        newBettingValue = playerBet;
+        break;
+        
+      default:
+        throw handleGameError(null, ErrorType.INVALID_ACTION, 'betAction');
+    }
+
+    // 플레이어 베팅액 및 상태 업데이트
+    if (isPlayerDie) {
+      // 폴드한 경우
+      await supabase
+        .from('players')
+        .update({ is_die: true })
+        .eq('id', playerId);
+    } else {
+      // 베팅한 경우 플레이어의 베팅액 차감 및 팟에 추가
+      if (playerBet > 0) {
+        const newBalance = (player.balance || 0) - playerBet;
+        
+        if (newBalance < 0) {
+          throw handleGameError(null, ErrorType.INVALID_ACTION, 'betAction');
+        }
+        
+        await supabase
+          .from('players')
+          .update({ balance: newBalance })
+          .eq('id', playerId);
+      }
+    }
+
+    // 게임 액션 기록
+    await recordGameAction(gameId, action, playerId, playerBet);
+
+    // 다음 플레이어 찾기
+    let nextPlayer = null;
+    const playerIndex = activePlayers.findIndex((p: any) => p.id === playerId);
+    
+    // 다음 생존 플레이어 찾기 (현재 폴드한 플레이어 제외)
+    const remainingPlayers = activePlayers.filter(
+      (p: any) => p.id !== playerId || !isPlayerDie
+    );
+    
+    if (remainingPlayers.length <= 1) {
+      // 한 명만 남았으면 게임 종료
+      await finishGame(gameId);
+      return;
+    }
+    
+    if (playerIndex >= 0 && playerIndex < activePlayers.length - 1) {
+      // 다음 플레이어
+      nextPlayer = activePlayers[playerIndex + 1];
+    } else {
+      // 마지막 플레이어였다면 처음으로 돌아감
+      nextPlayer = activePlayers[0];
+    }
+
+    // 모든 플레이어가 베팅을 맞췄는지 확인
+    const allPlayersMatched = activePlayers.every(
+      (p: any) => p.id === playerId || p.bet === newBettingValue || p.is_die
+    );
+
+    if (allPlayersMatched) {
+      // 베팅 라운드 종료
+      await finishBettingRound(gameId);
+    } else {
+      // 다음 플레이어로 차례 넘김
+      await supabase
+        .from('games')
+        .update({
+          current_turn: nextPlayer.id,
+          betting_value: newBettingValue,
+          total_pot: totalPot + playerBet,
+          betting_end_time: new Date(Date.now() + BETTING_TIME_LIMIT_MS).toISOString() // 새로운 타임아웃 설정
+        })
+        .eq('id', gameId);
+
+      // 다음 플레이어 베팅 시간 타이머 설정
+      setTimeout(async () => {
+        try {
+          // 게임 상태 다시 확인 (중간에 베팅이 완료되었을 수 있음)
+          const { data: currentGame, error: currentGameError } = await supabase
+            .from('games')
+            .select('status, current_turn, betting_end_time, betting_round')
+            .eq('id', gameId)
+            .single();
+          
+          if (currentGameError) {
+            console.error('게임 상태 확인 중 오류:', currentGameError);
+            return;
+          }
+          
+          // 게임이 진행 중이고 다음 플레이어의 차례이며 베팅 시간이 만료된 경우
+          if (currentGame && currentGame.status === 'playing' && 
+              currentGame.current_turn === nextPlayer.id && 
+              new Date(currentGame.betting_end_time) <= new Date()) {
+            console.log(`게임 ${gameId}: 플레이어 ${nextPlayer.id} 베팅 타임아웃, 자동 폴드 처리`);
+            await handleBettingTimeout(gameId);
+          }
+        } catch (err) {
+          console.error('베팅 타이머 처리 중 오류:', err);
+        }
+      }, BETTING_TIME_LIMIT_MS);
+    }
+  } catch (error) {
+    console.error('베팅 액션 처리 중 오류:', error);
+    throw error;
+  }
+}

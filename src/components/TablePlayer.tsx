@@ -103,15 +103,15 @@ export function TablePlayer({
           <div
             key={idx}
             className={cn(
-              'relative w-16 h-22 transition-all',
+              'relative w-24 h-32 transition-all',
               card.status === 'hidden' && 'opacity-50 scale-95'
             )}
           >
             <Image
               src={getCardImageUrl(card.status, card.value)}
               alt={card.status}
-              width={64}
-              height={90}
+              width={96}
+              height={130}
               className="rounded-md shadow-lg"
               onError={handleImageError}
             />

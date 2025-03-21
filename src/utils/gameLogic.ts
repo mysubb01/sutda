@@ -358,4 +358,51 @@ export function determineWinner(players: { id: string; cards: number[]; isDie: b
   }
   
   return { winnerId, isRegame: false };
-} 
+}
+
+// 3장 중 최적의 2장 조합 찾기
+export function findBestCombination(cards: number[]): number[] {
+  if (!cards || cards.length !== 3) {
+    return cards || [];
+  }
+
+  // 3장 중 가능한 모든 2장 조합
+  const combinations = [
+    [cards[0], cards[1]],
+    [cards[0], cards[2]],
+    [cards[1], cards[2]]
+  ];
+
+  // 각 조합 평가
+  const evaluations = combinations.map(combo => {
+    const evaluation = evaluateCards(combo);
+    return {
+      cards: combo,
+      rank: evaluation.rank,
+      value: evaluation.value
+    };
+  });
+
+  // 값이 가장 높은 조합 찾기
+  const bestCombination = evaluations.reduce((best, current) => {
+    // 구사/멍텅구리구사처럼 음수 값을 가진 특수 족보는 특별 처리
+    const isBestSpecial = best.value < 0;
+    const isCurrentSpecial = current.value < 0;
+
+    if (isBestSpecial && isCurrentSpecial) {
+      // 둘 다 특수 족보면 값이 큰 것이 이김 (-100 > -200)
+      return best.value > current.value ? best : current;
+    } else if (isBestSpecial) {
+      // best만 특수 족보면 current 선택
+      return current;
+    } else if (isCurrentSpecial) {
+      // current만 특수 족보면 best 유지
+      return best;
+    } else {
+      // 일반 족보는 값이 높은 것이 이김
+      return best.value >= current.value ? best : current;
+    }
+  }, evaluations[0]);
+
+  return bestCombination.cards;
+}
