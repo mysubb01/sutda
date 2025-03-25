@@ -215,72 +215,61 @@ export async function getRoomInfo(roomId: string): Promise<Room> {
  */
 export async function leaveRoom(roomId: string, playerId: string): Promise<void> {
   try {
-    // 플레이어 정보 조회
-    const { data: playerData, error: playerError } = await supabase
-      .from('players')
-      .select('*')
-      .eq('id', playerId)
-      .eq('room_id', roomId)
-      .single();
-    
-    if (playerError) {
-      console.error('플레이어 정보 조회 오류:', playerError);
-      throw new Error('플레이어 정보를 조회할 수 없습니다.');
-    }
-    
-    // 방장(seat_index = 0)인 경우 새로운 방장을 선출
-    if (playerData.seat_index === 0) {
-      // 다른 플레이어 조회
-      const { data: otherPlayers, error: otherPlayersError } = await supabase
-        .from('players')
-        .select('*')
-        .eq('room_id', roomId)
-        .neq('id', playerId)
-        .order('created_at', { ascending: true });
-      
-      if (otherPlayersError) {
-        console.error('다른 플레이어 조회 오류:', otherPlayersError);
-        throw new Error('다른 플레이어를 조회할 수 없습니다.');
-      }
-      
-      // 다른 플레이어가 있는 경우 새로운 방장을 선출
-      if (otherPlayers && otherPlayers.length > 0) {
-        const newOwner = otherPlayers[0]; // 새로운 방장
-        
-        // 새로운 방장의 seat_index를 0으로 업데이트
-        const { error: updateError } = await supabase
-          .from('players')
-          .update({ seat_index: 0 })
-          .eq('id', newOwner.id);
-        
-        if (updateError) {
-          console.error('새로운 방장 업데이트 오류:', updateError);
-          throw new Error('새로운 방장을 선출할 수 없습니다.');
-        }
-      } else {
-        // 다른 플레이어가 없는 경우 방을 비활성화
-        const { error: roomUpdateError } = await supabase
-          .from('rooms')
-          .update({ is_active: false })
-          .eq('id', roomId);
-        
-        if (roomUpdateError) {
-          console.error('방 비활성화 오류:', roomUpdateError);
-        }
-      }
-    }
-    
-    // 플레이어 삭제
-    const { error: deleteError } = await supabase
+    // 플레이어 제거
+    const { error: playerError } = await supabase
       .from('players')
       .delete()
       .eq('id', playerId)
       .eq('room_id', roomId);
-    
-    if (deleteError) {
-      console.error('플레이어 삭제 오류:', deleteError);
-      throw new Error('플레이어를 삭제할 수 없습니다.');
+
+    if (playerError) {
+      console.error('플레이어 제거 오류:', playerError);
+      throw new Error('방에서 나갈 수 없습니다: ' + playerError.message);
     }
+
+    // 방에 남은 플레이어 확인
+    const { data: remainingPlayers, error: countError } = await supabase
+      .from('players')
+      .select('id')
+      .eq('room_id', roomId);
+
+    if (countError) {
+      console.error('남은 플레이어 확인 오류:', countError);
+      return;
+    }
+
+    // 방에 플레이어가 없으면 방을 비활성화
+    if (!remainingPlayers || remainingPlayers.length === 0) {
+      const { error: roomError } = await supabase
+        .from('rooms')
+        .update({ is_active: false })
+        .eq('id', roomId);
+
+      if (roomError) {
+        console.error('방 비활성화 오류:', roomError);
+      } else {
+        console.log(`방 ${roomId}이(가) 비활성화되었습니다 (플레이어 0명)`);  
+      }
+
+      // 게임도 종료 처리
+      const { error: gameError } = await supabase
+        .from('games')
+        .update({ status: 'finished' })
+        .eq('id', roomId);
+
+      if (gameError) {
+        console.error('게임 종료 오류:', gameError);
+      }
+    }
+
+    // 브라우저에서 실행 중인 경우에만 localStorage 사용
+    if (typeof window !== 'undefined') {
+      // 로컬 스토리지에서 플레이어 정보 제거
+      localStorage.removeItem(`game_${roomId}_player_id`);
+      localStorage.removeItem(`game_${roomId}_username`);
+    }
+
+    console.log(`플레이어 ${playerId}가 방 ${roomId}에서 나갔습니다.`);
   } catch (err) {
     console.error('방 나가기 중 예외 발생:', err);
     throw err;
@@ -443,5 +432,24 @@ export async function changeSeat(roomId: string, playerId: string, newSeatIndex:
   } catch (err) {
     console.error('좌석 변경 중 예외 발생:', err);
     throw err;
+  }
+}
+
+/**
+ * 플레이어 하트비트 업데이트
+ * 플레이어의 마지막 활동 시간을 업데이트합니다.
+ */
+export async function updatePlayerHeartbeat(playerId: string): Promise<void> {
+  try {
+    const { error } = await supabase
+      .from('players')
+      .update({ last_heartbeat: new Date().toISOString() })
+      .eq('id', playerId);
+
+    if (error) {
+      console.error('플레이어 하트비트 업데이트 오류:', error);
+    }
+  } catch (err) {
+    console.error('하트비트 업데이트 중 예외 발생:', err);
   }
 }
