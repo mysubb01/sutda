@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { getAllRooms } from '@/lib/roomApi';
+import { getAllRooms, cleanupInactivePlayers, cleanupRooms } from '@/lib/roomApi';
 import { Room } from '@/types/game';
 import Link from 'next/link';
 import { toast } from 'react-hot-toast';
@@ -33,8 +33,29 @@ export default function RoomListPage() {
       }
     }
 
+    // 비활성 플레이어와 방 정리 함수
+    async function cleanupSystem() {
+      try {
+        // 1. 비활성 플레이어 정리 (2분 이상 하트비트가 업데이트되지 않은 플레이어)
+        await cleanupInactivePlayers();
+        
+        // 2. 빈 방 정리
+        await cleanupRooms();
+        
+        // 3. 방 목록 다시 불러오기
+        await loadRooms();
+        
+        console.log('시스템 정리 완료: 비활성 플레이어 및 빈 방 정리됨');
+      } catch (err) {
+        console.error('시스템 정리 중 오류:', err);
+      }
+    }
+
     // 초기 데이터 로드
     loadRooms();
+    
+    // 초기 시스템 정리 실행 (초기화 시에도 정리)
+    cleanupSystem();
 
     // Supabase Realtime 구독 설정 - 방 목록 변경 감지
     const roomsSubscription = supabase
@@ -140,7 +161,7 @@ export default function RoomListPage() {
 
     // 30초마다 방 목록 새로고침 (추가 안전장치)
     const refreshInterval = setInterval(() => {
-      loadRooms();
+      cleanupSystem();
     }, 30000);
 
     // 구독 정리

@@ -485,3 +485,101 @@ export async function updatePlayerHeartbeat(playerId: string): Promise<void> {
     console.error('하트비트 업데이트 중 예외 발생:', err);
   }
 }
+
+/**
+ * 플레이어 비활성화 처리
+ * 2분 동안 활동하지 않은 플레이어를 비활성화 처리합니다.
+ */
+export async function cleanupInactivePlayers(): Promise<void> {
+  try {
+    // 2분(120초) 동안 활동하지 않은 플레이어를 비활성화 처리
+    const cutoffTime = new Date();
+    cutoffTime.setMinutes(cutoffTime.getMinutes() - 2);
+    
+    const { data: inactivePlayers, error } = await supabase
+      .from('players')
+      .select('id, room_id, username, last_heartbeat')
+      .lt('last_heartbeat', cutoffTime.toISOString());
+    
+    if (error) {
+      console.error('플레이어 비활성화 처리 오류:', error);
+      return;
+    }
+    
+    console.log(`비활성화 플레이어 ${inactivePlayers?.length || 0}명`);
+    
+    // 비활성화 플레이어 처리
+    if (inactivePlayers && inactivePlayers.length > 0) {
+      for (const player of inactivePlayers) {
+        console.log(`플레이어 ${player.username} (${player.id})을(를) 비활성화 처리`);
+        await leaveRoom(player.room_id, player.id);
+      }
+    }
+  } catch (err) {
+    console.error('비활성화 처리 중 예외 발생:', err);
+  }
+}
+
+/**
+ * 방 비활성화 처리
+ * 비활성화 처리된 방을 삭제합니다.
+ */
+export async function cleanupRooms(): Promise<void> {
+  try {
+    console.log('방 비활성화 처리 시작');
+    
+    // 1. 비활성화된 방을 삭제
+    const { data: activeRooms, error: activeRoomsError } = await supabase
+      .from('rooms')
+      .select('id, name')
+      .eq('is_active', true);
+    
+    if (activeRoomsError) {
+      console.error('활성화된 방 목록 조회 오류:', activeRoomsError);
+      return;
+    }
+    
+    // 활성화된 방에 플레이어가 0명인 경우 비활성화 처리
+    for (const room of activeRooms || []) {
+      const { data: players, error: playersError } = await supabase
+        .from('players')
+        .select('id')
+        .eq('room_id', room.id);
+      
+      if (playersError) {
+        console.error(`방 ${room.id} 플레이어 목록 조회 오류:`, playersError);
+        continue;
+      }
+      
+      const playerCount = players?.length || 0;
+      
+      // 방에 플레이어가 0명인 경우 비활성화 처리
+      if (playerCount === 0) {
+        console.log(`방 ${room.id}에 플레이어가 0명, 비활성화 처리`);
+        
+        const { error: updateError } = await supabase
+          .from('rooms')
+          .update({ is_active: false })
+          .eq('id', room.id);
+        
+        if (updateError) {
+          console.error(`방 ${room.id} 비활성화 오류:`, updateError);
+        }
+        
+        // 게임도 종료 처리
+        const { error: gameError } = await supabase
+          .from('games')
+          .update({ status: 'finished' })
+          .eq('id', room.id);
+        
+        if (gameError) {
+          console.error(`게임 ${room.id} 종료 오류:`, gameError);
+        }
+      }
+    }
+    
+    console.log('방 비활성화 처리 완료');
+  } catch (err) {
+    console.error('방 비활성화 처리 중 예외 발생:', err);
+  }
+}
