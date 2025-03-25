@@ -19,7 +19,11 @@ export default function RoomListPage() {
       try {
         setLoading(true);
         const roomList = await getAllRooms();
-        setRooms(roomList);
+        // 플레이어가 0명인 방 필터링 (추가 안전장치)
+        const filteredRooms = roomList.filter(room => 
+          room.current_players && room.current_players > 0 && room.is_active
+        );
+        setRooms(filteredRooms);
         setError(null);
       } catch (err) {
         console.error('방 목록 로딩 오류:', err);
@@ -48,15 +52,23 @@ export default function RoomListPage() {
           if (payload.eventType === 'INSERT') {
             // 새로운 방이 생성된 경우
             const newRoom = payload.new as Room;
-            setRooms(prevRooms => [...prevRooms, newRoom]);
+            // is_active가 true이고 현재 인원이 0명 이상인 방만 추가
+            if (newRoom.is_active && newRoom.current_players && newRoom.current_players > 0) {
+              setRooms(prevRooms => [...prevRooms, newRoom]);
+            }
           } else if (payload.eventType === 'UPDATE') {
             // 방 정보가 업데이트된 경우
             const updatedRoom = payload.new as Room;
-            setRooms(prevRooms => 
-              prevRooms.map(room => 
+            setRooms(prevRooms => {
+              // 업데이트된 방이 비활성화되었거나 플레이어가 0명이 되었다면 목록에서 제거
+              if (!updatedRoom.is_active || !updatedRoom.current_players || updatedRoom.current_players <= 0) {
+                return prevRooms.filter(room => room.id !== updatedRoom.id);
+              }
+              // 그렇지 않다면 업데이트
+              return prevRooms.map(room => 
                 room.id === updatedRoom.id ? updatedRoom : room
-              )
-            );
+              );
+            });
           } else if (payload.eventType === 'DELETE') {
             // 방이 삭제된 경우
             const deletedRoomId = payload.old.id;
@@ -68,9 +80,74 @@ export default function RoomListPage() {
       )
       .subscribe();
 
+    // 플레이어 테이블 변경 구독 - 방의 인원 수 변경 감지
+    const playersSubscription = supabase
+      .channel('players-changes')
+      .on('postgres_changes',
+        {
+          event: '*', // insert, update, delete 모두 감지
+          schema: 'public',
+          table: 'players'
+        },
+        async (payload) => {
+          console.log('플레이어 변경 감지:', payload);
+          
+          // 변경된 플레이어의 방 ID
+          const roomId = payload.eventType === 'DELETE' 
+            ? payload.old.room_id 
+            : payload.new.room_id;
+          
+          if (roomId) {
+            // 해당 방의 최신 정보를 가져옴
+            try {
+              const { data: roomInfo, error } = await supabase
+                .from('rooms')
+                .select('*, players:players(id)')
+                .eq('id', roomId)
+                .single();
+              
+              if (error) throw error;
+              
+              // 방의 현재 플레이어 수 계산
+              const currentPlayers = Array.isArray(roomInfo.players) ? roomInfo.players.length : 0;
+              
+              setRooms(prevRooms => {
+                // 플레이어가 0명이 되었거나 방이 비활성화되었다면 목록에서 제거
+                if (currentPlayers <= 0 || !roomInfo.is_active) {
+                  return prevRooms.filter(room => room.id !== roomId);
+                }
+                
+                // 방 목록에 이미 있는 경우 플레이어 수 업데이트
+                const roomIndex = prevRooms.findIndex(room => room.id === roomId);
+                if (roomIndex >= 0) {
+                  const updatedRooms = [...prevRooms];
+                  updatedRooms[roomIndex] = {
+                    ...updatedRooms[roomIndex],
+                    current_players: currentPlayers
+                  };
+                  return updatedRooms;
+                }
+                
+                return prevRooms;
+              });
+            } catch (err) {
+              console.error('방 정보 업데이트 오류:', err);
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    // 30초마다 방 목록 새로고침 (추가 안전장치)
+    const refreshInterval = setInterval(() => {
+      loadRooms();
+    }, 30000);
+
     // 구독 정리
     return () => {
       roomsSubscription.unsubscribe();
+      playersSubscription.unsubscribe();
+      clearInterval(refreshInterval);
     };
   }, []);
 

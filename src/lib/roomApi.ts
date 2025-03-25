@@ -18,13 +18,45 @@ export async function getAllRooms(): Promise<Room[]> {
   }
 
   // 각 방의 현재 플레이어 수 계산
-  const roomsWithPlayerCount = (data || []).map(room => ({
-    ...room,
-    current_players: Array.isArray(room.players) ? room.players.length : 0,
-    players: undefined  // API 응답에서 players 배열 제거
-  }));
+  const roomsWithPlayerCount = (data || []).map(room => {
+    const playerCount = Array.isArray(room.players) ? room.players.length : 0;
+    
+    // 플레이어가 0명인 방은 비활성화 처리 (삭제는 아님)
+    if (playerCount === 0) {
+      // 비활성화 처리
+      supabase
+        .from('rooms')
+        .update({ is_active: false })
+        .eq('id', room.id)
+        .then(({ error }) => {
+          if (error) {
+            console.error(`방 ${room.id} 비활성화 오류:`, error);
+          } else {
+            console.log(`방 ${room.id} 비활성화 처리 (플레이어 0명)`);
+          }
+        });
+      
+      // 게임도 종료 처리
+      supabase
+        .from('games')
+        .update({ status: 'finished' })
+        .eq('id', room.id)
+        .then(({ error }) => {
+          if (error) {
+            console.error(`게임 ${room.id} 종료 오류:`, error);
+          }
+        });
+    }
+    
+    return {
+      ...room,
+      current_players: playerCount,
+      players: undefined  // API 응답에서 players 배열 제거
+    };
+  });
 
-  return roomsWithPlayerCount;
+  // 플레이어가 1명 이상인 방만 반환
+  return roomsWithPlayerCount.filter(room => room.current_players > 0);
 }
 
 /**
