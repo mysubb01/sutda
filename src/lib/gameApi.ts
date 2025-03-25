@@ -847,6 +847,11 @@ export async function finishGame(gameId: string): Promise<void> {
       console.log(`게임 ${gameId} 승자: ${winner.playerId} (${winner.rank})`);
     }
 
+    // 게임이 종료된 후 5초 후에 게임을 초기화하고 플레이어를 제거합니다.
+    setTimeout(() => {
+      cleanupAfterGameFinish(gameId);
+    }, 5000); // 5초 후에 게임을 초기화하고 플레이어를 제거합니다.
+
   } catch (error) {
     console.error('게임 종료 처리 중 오류 발생:', error);
     throw error;
@@ -1410,7 +1415,7 @@ export async function handleBettingTimeout(gameId: string): Promise<void> {
     
     // 폴드하지 않은 플레이어만 필터링
     const activePlayers = players.filter(
-      (p: any) => p.id !== currentPlayer.id || !p.is_die
+      (p: any) => !p.is_die
     );
     
     // 활성 플레이어가 1명 이하면 게임 종료
@@ -1753,5 +1758,112 @@ export async function toggleReady(gameId: string, playerId: string, isReady: boo
   } catch (error) {
     console.error('준비 상태 변경 오류:', error);
     throw handleGameError(error, ErrorType.DB_ERROR, '준비 상태 변경 중 오류');
+  }
+}
+
+/**
+ * 게임 종료 후 처리
+ * 게임이 종료된 후, 2분이 지난 후 자동으로 게임을 초기화하고 플레이어를 제거합니다.
+ */
+export async function cleanupAfterGameFinish(gameId: string): Promise<void> {
+  try {
+    console.log(`게임 ${gameId} 종료 후 처리`);
+    
+    // 게임 상태 확인
+    const { data: game, error: gameError } = await supabase
+      .from('games')
+      .select('status')
+      .eq('id', gameId)
+      .single();
+    
+    if (gameError) {
+      console.error(`게임 ${gameId} 종료 후 처리 중 오류:`, gameError);
+      return;
+    }
+    
+    // 게임이 종료되었는지 확인
+    if (game.status !== 'finished' && game.status !== 'draw') {
+      console.log(`게임 ${gameId}가 아직 종료되지 않았습니다.`);
+      return;
+    }
+    
+    // 2분이 지난 후에만 처리
+    const cutoffTime = new Date();
+    cutoffTime.setMinutes(cutoffTime.getMinutes() - 2);
+    
+    // 게임 정보 조회
+    const { data: gameData, error: gameDataError } = await supabase
+      .from('games')
+      .select('updated_at')
+      .eq('id', gameId)
+      .single();
+    
+    if (gameDataError) {
+      console.error(`게임 ${gameId} 정보 조회 오류:`, gameDataError);
+      return;
+    }
+    
+    // 게임이 2분 전보다 최근에 업데이트되었다면 처리하지 않음
+    if (new Date(gameData.updated_at) > cutoffTime) {
+      console.log(`게임 ${gameId}가 2분 전보다 최근에 업데이트되었습니다. 처리하지 않습니다.`);
+      return;
+    }
+    
+    // 플레이어 정보 조회
+    const { data: players, error: playersError } = await supabase
+      .from('players')
+      .select('id, username, game_id, room_id, last_heartbeat')
+      .eq('game_id', gameId);
+    
+    if (playersError) {
+      console.error(`게임 ${gameId} 플레이어 정보 조회 오류:`, playersError);
+      return;
+    }
+    
+    // 2분이 지난 후에만 처리
+    const inactivePlayers = players.filter(player => {
+      // last_heartbeat이 없거나, 2분 전보다 이전에 업데이트되었다면 제거
+      return (
+        !player.last_heartbeat || 
+        new Date(player.last_heartbeat).getTime() < cutoffTime.getTime()
+      );
+    });
+    
+    console.log(`게임 ${gameId}에서 2분이 지난 후에만 처리: ${inactivePlayers.length}명`);
+    
+    // 플레이어 제거
+    for (const player of inactivePlayers) {
+      if (player.room_id) {
+        console.log(`플레이어 ${player.username} (${player.id}) 제거, 방 ID: ${player.room_id}`);
+        
+        try {
+          // leaveRoom 함수 호출
+          const { leaveRoom } = require('./roomApi');
+          await leaveRoom(player.room_id, player.id);
+        } catch (err) {
+          console.error(`플레이어 ${player.id} 제거 중 오류:`, err);
+        }
+      } else {
+        console.log(`플레이어 ${player.username} (${player.id}) 제거`);
+        
+        try {
+          // 플레이어 직접 제거
+          const { error: removeError } = await supabase
+            .from('players')
+            .delete()
+            .eq('id', player.id);
+          
+          if (removeError) {
+            console.error(`플레이어 ${player.id} 제거 중 오류:`, removeError);
+          }
+        } catch (err) {
+          console.error(`플레이어 ${player.id} 제거 중 오류:`, err);
+        }
+      }
+    }
+    
+    console.log(`게임 ${gameId} 종료 후 처리 완료`);
+  } catch (err) {
+    console.error(`게임 ${gameId} 종료 후 처리 중 오류:`, err);
   }
 }
