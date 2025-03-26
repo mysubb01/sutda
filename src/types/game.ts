@@ -100,6 +100,7 @@ export interface GameState {
   regame_start_time?: string; // 재경기 시작 시간
   betting_round?: number; // 현재 베팅 라운드 (3장 모드에서 사용)
   game_mode?: GameMode; // 게임 모드 (2장/3장)
+  betting_end_time?: string; // 베팅 제한 시간
 }
 
 /**

@@ -10,7 +10,7 @@ declare global {
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { GameState, Message } from '@/types/game';
-import { getGameState, joinGame, updateSeat, isRoomOwner, canStartGame, startGame, toggleReady } from '@/lib/gameApi';
+import { getGameState, joinGame, updateSeat, isRoomOwner, canStartGame, startGame, toggleReady, handleBettingTimeout } from '@/lib/gameApi';
 import { GameTable } from '@/components/GameTable';
 import { GameControls } from '@/components/GameControls';
 import { Chat } from '@/components/Chat';
@@ -346,6 +346,46 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
       setIsStartingGame(false);
     }
   };
+  
+  // 타임아웃 확인 로직
+  useEffect(() => {
+    // 게임 플레이 중이 아니면 타이머 설정 안함
+    if (!gameState || gameState.status !== 'playing') {
+      return;
+    }
+    
+    // 10초마다 베팅 타임아웃 체크
+    const checkTimeoutInterval = setInterval(async () => {
+      try {
+        // 베팅 종료 시간이 있고, 게임이 플레이 중인 경우에만 체크
+        if (gameState.betting_end_time) {
+          const currentTime = new Date().getTime();
+          const bettingEndTime = new Date(gameState.betting_end_time).getTime();
+          
+          // 디버깅용 로그
+          console.log('타임아웃 체크:', {
+            현재시간: new Date(currentTime).toLocaleString(),
+            종료시간: new Date(bettingEndTime).toLocaleString(),
+            남은시간: Math.floor((bettingEndTime - currentTime) / 1000) + '초'
+          });
+          
+          // 베팅 시간이 초과된 경우 서버에 타임아웃 처리 요청
+          if (currentTime > bettingEndTime) {
+            console.log('베팅 시간 초과 감지, 타임아웃 처리 요청');
+            await handleBettingTimeout(gameId);
+            // 게임 상태 다시 불러오기
+            fetchGameState();
+          }
+        }
+      } catch (err) {
+        console.error('타임아웃 체크 중 오류:', err);
+      }
+    }, 5000); // 5초마다 체크
+    
+    return () => {
+      clearInterval(checkTimeoutInterval);
+    };
+  }, [gameId, gameState]);
   
   // 게임 상태와 현재 플레이어 정보 추출
   const isWaiting = gameState?.status === 'waiting';
