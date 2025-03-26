@@ -55,9 +55,11 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
         setMessages(data);
       } else {
         console.error('메시지 불러오기 오류:', error);
+        toast.error(`메시지 불러오기 오류: ${error.message || '알 수 없는 오류'}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('메시지 불러오기 예외:', err);
+      toast.error(`메시지 불러오기 오류: ${err?.message || '알 수 없는 오류'}`);
     }
   };
   
@@ -88,9 +90,11 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
       }
       
       return data;
-    } catch (err) {
+    } catch (err: any) {
       console.error('게임 상태 불러오기 실패:', err);
-      setError('게임 정보를 불러오는 중 오류가 발생했습니다.');
+      const errorMsg = err?.message || '게임 정보를 불러오는 중 오류가 발생했습니다.';
+      setError(errorMsg);
+      toast.error(`게임 로드 오류: ${errorMsg}`);
       return null;
     }
   };
@@ -250,9 +254,11 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
       fetchMessages();
       
       // 이제 setupSubscriptions는 호출하지 않음 (폴링 방식 사용)
-    } catch (err) {
+    } catch (err: any) {
       console.error('게임 참가 오류:', err);
-      setError('게임 참가 중 오류가 발생했습니다.');
+      const errorMsg = err?.message || '게임 참가 중 오류가 발생했습니다.';
+      setError(errorMsg);
+      toast.error(`게임 참가 오류: ${errorMsg}`);
     } finally {
       setIsJoining(false);
     }

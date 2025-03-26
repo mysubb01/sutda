@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { GameState, BetActionType } from '@/types/game';
 import { startGame, placeBet } from '@/lib/gameApi';
 import soundPlayer from '@/utils/soundEffects';
+import { toast } from 'react-hot-toast';
 
 interface GameControlsProps {
   gameState: GameState;
@@ -96,9 +97,11 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
       // 카드 배분 사운드 재생
       soundPlayer.play('handout');
       onAction();
-    } catch (err) {
+    } catch (err: any) {
       console.error('게임 시작 오류:', err);
-      setError('게임을 시작하는 중 오류가 발생했습니다.');
+      const errorMsg = err?.message || '게임을 시작하는 중 오류가 발생했습니다.';
+      setError(errorMsg);
+      toast.error(`게임 시작 오류: ${errorMsg}`);
     } finally {
       setIsLoading(false);
     }
@@ -125,9 +128,11 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
       // 일반 베팅 사운드 재생
       soundPlayer.play('call');
       onAction();
-    } catch (err) {
+    } catch (err: any) {
       console.error('베팅 오류:', err);
-      setError('베팅 중 오류가 발생했습니다.');
+      const errorMsg = err?.message || '베팅 중 오류가 발생했습니다.';
+      setError(errorMsg);
+      toast.error(`베팅 오류: ${errorMsg}`);
     } finally {
       setIsLoading(false);
     }
@@ -143,9 +148,11 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
       // 콜 사운드 재생
       soundPlayer.play('call');
       onAction();
-    } catch (err) {
+    } catch (err: any) {
       console.error('콜 오류:', err);
-      setError('콜 중 오류가 발생했습니다.');
+      const errorMsg = err?.message || '콜 중 오류가 발생했습니다.';
+      setError(errorMsg);
+      toast.error(`콜 오류: ${errorMsg}`);
     } finally {
       setIsLoading(false);
     }
@@ -161,9 +168,11 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
       // 다이 사운드 재생
       soundPlayer.play('die');
       onAction();
-    } catch (err) {
+    } catch (err: any) {
       console.error('다이 오류:', err);
-      setError('다이 중 오류가 발생했습니다.');
+      const errorMsg = err?.message || '다이 중 오류가 발생했습니다.';
+      setError(errorMsg);
+      toast.error(`다이 오류: ${errorMsg}`);
     } finally {
       setIsLoading(false);
     }
@@ -179,9 +188,11 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
       // 하프 사운드 재생
       soundPlayer.play('half');
       onAction();
-    } catch (err) {
+    } catch (err: any) {
       console.error('하프 오류:', err);
-      setError('하프 중 오류가 발생했습니다.');
+      const errorMsg = err?.message || '하프 중 오류가 발생했습니다.';
+      setError(errorMsg);
+      toast.error(`하프 오류: ${errorMsg}`);
     } finally {
       setIsLoading(false);
     }
@@ -197,9 +208,11 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
       // 체크 사운드 재생
       soundPlayer.play('check');
       onAction();
-    } catch (err) {
+    } catch (err: any) {
       console.error('체크 오류:', err);
-      setError('체크 중 오류가 발생했습니다.');
+      const errorMsg = err?.message || '체크 중 오류가 발생했습니다.';
+      setError(errorMsg);
+      toast.error(`체크 오류: ${errorMsg}`);
     } finally {
       setIsLoading(false);
     }
@@ -226,9 +239,11 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
       // 따당(삥) 사운드 재생
       soundPlayer.play('double');
       onAction();
-    } catch (err) {
+    } catch (err: any) {
       console.error('따당 베팅 오류:', err);
-      setError('따당 베팅 중 오류가 발생했습니다.');
+      const errorMsg = err?.message || '따당 베팅 중 오류가 발생했습니다.';
+      setError(errorMsg);
+      toast.error(`따당 베팅 오류: ${errorMsg}`);
     } finally {
       setIsLoading(false);
     }
@@ -254,9 +269,11 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
       // 쿼터 사운드 재생 (call 사운드 사용)
       soundPlayer.play('call');
       onAction();
-    } catch (err) {
+    } catch (err: any) {
       console.error('쿼터 베팅 오류:', err);
-      setError('쿼터 베팅 중 오류가 발생했습니다.');
+      const errorMsg = err?.message || '쿼터 베팅 중 오류가 발생했습니다.';
+      setError(errorMsg);
+      toast.error(`쿼터 베팅 오류: ${errorMsg}`);
     } finally {
       setIsLoading(false);
     }
