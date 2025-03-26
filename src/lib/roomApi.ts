@@ -444,11 +444,15 @@ export async function checkRoomAccess(roomId: string, playerId: string): Promise
  */
 export async function changeSeat(roomId: string, playerId: string, newSeatIndex: number): Promise<void> {
   try {
-    // updateSeat ud568uc218 uc0acuc6a9 (ud1b5ud569 ud568uc218)
+    console.log(`[changeSeat] Changing seat in room ${roomId} - Player: ${playerId}, New seat: ${newSeatIndex}`);
+    
+    // updateSeat 함수 사용 (통합 함수) - roomId 전달
     const { updateSeat } = require('./gameApi');
-    await updateSeat(null, playerId, newSeatIndex);
+    await updateSeat(null, playerId, newSeatIndex, roomId);
+    
+    console.log(`[changeSeat] Seat change successful`);
   } catch (err) {
-    console.error('uc88cuc11d ubcc0uacbd uc911 uc608uc678 ubc1cuc0dd:', err);
+    console.error('[changeSeat] 좌석 변경 중 예외 발생:', err);
     throw err;
   }
 }

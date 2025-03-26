@@ -65,104 +65,182 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
   
   // 게임 상태 불러오기
   const fetchGameState = async () => {
+    console.log(`[fetchGameState] Starting fetch for gameId: ${gameId}`);
     try {
+      const fetchStart = Date.now();
       const data = await getGameState(gameId);
-      console.log('게임 상태 업데이트:', data);
+      console.log(`[fetchGameState] Received response in ${Date.now() - fetchStart}ms`);      
+      console.log('[fetchGameState] Received players data:', data.players.map(p => ({
+        id: p.id,
+        seat_index: p.seat_index,
+        username: p.username,
+        is_ready: p.is_ready
+      })));
+      
       setGameState(data);
+      console.log('[fetchGameState] State updated in React component');
       
       // 플레이어 정보가 있는 경우
       if (playerId) {
+        console.log(`[fetchGameState] Found playerId: ${playerId}, checking status`);
+        
         // 방장 여부 확인
+        const hostStatusStart = Date.now();
         const hostStatus = await isRoomOwner(gameId, playerId);
+        console.log(`[fetchGameState] Host status check completed in ${Date.now() - hostStatusStart}ms: ${hostStatus}`);
         setIsHost(hostStatus);
         
         // 준비 상태 확인
         const player = data.players.find(p => p.id === playerId);
         if (player) {
-          setIsReady(player.is_ready || false);
+          const readyStatus = player.is_ready || false;
+          console.log(`[fetchGameState] Player ${playerId} ready status: ${readyStatus}`);
+          setIsReady(readyStatus);
+        } else {
+          console.warn(`[fetchGameState] Player with ID ${playerId} not found in game state players`);
         }
         
         // 게임 시작 가능 여부 확인 (방장인 경우만)
         if (hostStatus) {
+          const startCheckStart = Date.now();
           const startStatus = await canStartGame(gameId);
+          console.log(`[fetchGameState] Can start game check completed in ${Date.now() - startCheckStart}ms: ${JSON.stringify(startStatus)}`);
           setCanStart(startStatus);
         }
+      } else {
+        console.log('[fetchGameState] No playerId found, skipping player-specific checks');
       }
       
+      console.log('[fetchGameState] Completed successfully');
       return data;
     } catch (err: any) {
-      console.error('게임 상태 불러오기 실패:', err);
-      const errorMsg = err?.message || '게임 정보를 불러오는 중 오류가 발생했습니다.';
+      console.error('[fetchGameState] uc624ub958 ubc1cuc0dd:', err);
+      const errorMsg = err?.message || 'uac8cuc784 uc815ubcf4ub97c ubd88ub7ecuc624ub294 uc911 uc624ub958uac00 ubc1cuc0ddud588uc2b5ub2c8ub2e4.';
       setError(errorMsg);
-      toast.error(`게임 로드 오류: ${errorMsg}`);
+      toast.error(`uac8cuc784 ub85cub4dc uc624ub958: ${errorMsg}`);
       return null;
     }
   };
   
   // 자리 변경 처리 함수
   const handleSeatChange = async (seatIndex: number) => {
-    if (!playerId) return;
+    if (!playerId) {
+      console.error('[handleSeatChange] No playerId available');
+      return;
+    }
     
     try {
-      console.log(`[Client] Seat change started - Player ${playerId}, Seat ${seatIndex}`);
+      console.log(`[handleSeatChange] Starting seat change operation - Player ${playerId}, Seat ${seatIndex}, GameId ${gameId}`);
+      console.log('[handleSeatChange] Current players state:', gameState?.players.map(p => ({ 
+        id: p.id, 
+        seat_index: p.seat_index,
+        username: p.username
+      })));
       
-      // 중복 좌석 변경 방지
+      // uc911ubcf5 uc88cuc11d ubcc0uacbd ubc29uc9c0
       if (isSeatChanging || window._isSeatChanging) {
-        console.log('[Client] Seat change already in progress');
-        toast.error('좌석 변경이 이미 진행 중입니다. 잠시만 기다려주세요.');
+        console.log('[handleSeatChange] Seat change already in progress');
+        toast.error('uc88cuc11d ubcc0uacbd uc774ubbf8 uc9c4ud589 uc911uc785ub2c8ub2e4. uc7a0uc2dcub9cc uae30ub2e4ub824uc8fcuc138uc694.');
         return;
       }
       
       setIsSeatChanging(true);
       window._isSeatChanging = true; // Set global state flag
+      console.log('[handleSeatChange] Set seat changing flags');
       
-      // 게임 상태가 대기 상태가 아닌 경우 처리
+      // uac8cuc784 uc0c1ud0dcuac00 ub300uae30 uc0c1ud0dcuac00 uc544ub2cc uacbduc6b0 ucc98ub9ac
       if (gameState && gameState.status !== 'waiting') {
-        toast.error('게임이 진행 중일 때는 좌석을 이동할 수 없습니다.');
+        console.log(`[handleSeatChange] Game not in waiting state: ${gameState.status}`);
+        toast.error('uac8cuc784uc774 uc9c4ud589 uc911uc77c ub54cub294 uc88cuc11duc744 uc774ub3d9ud560 uc218 uc5c6uc2b5ub2c8ub2e4.');
         setIsSeatChanging(false);
         window._isSeatChanging = false;
         return;
       }
       
-      // 같은 자리인지 확인
+      // uac19uc740 uc790ub9acuc778uc9c0 ud655uc778
       if (gameState && gameState.players) {
         const currentPlayer = gameState.players.find(p => p.id === playerId);
+        console.log('[handleSeatChange] Current player data:', currentPlayer);
+        
         if (currentPlayer && currentPlayer.seat_index === seatIndex) {
-          toast.error('이미 해당 좌석에 있습니다.');
+          console.log(`[handleSeatChange] Already in the same seat: ${seatIndex}`);
+          toast.error('uc774ubbf8 ud574ub2f9 uc88cuc11duc5d0 uc788uc2b5ub2c8ub2e4.');
           setIsSeatChanging(false);
           window._isSeatChanging = false;
           return;
         }
       }
       
-      // API 호출
-      console.log(`[Client] Calling updateSeat API - Game ${gameId}, Player ${playerId}, Seat ${seatIndex}`);
-      await updateSeat(gameId, playerId, seatIndex);
+      // ub2e4ub978 ud50cub808uc774uc5b4uac00 uc120ud0ddud55c uc88cuc11duc5d0 uc788ub294uc9c0 uc870uc0ac
+      const occupiedSeats = gameState?.players.filter(p => 
+        p.id !== playerId && p.seat_index === seatIndex
+      );
       
-      // 성공 메시지
-      toast.success('좌석이 변경되었습니다.');
+      if (occupiedSeats && occupiedSeats.length > 0) {
+        console.log(`[handleSeatChange] Seat ${seatIndex} is already taken by:`, occupiedSeats);
+        toast.error('uc774ubbf8 ub2e4ub978 ud50cub808uc774uc5b4uac00 uc120ud0ddud55c uc88cuc11duc5d0 uc788uc2b5ub2c8ub2e4.');
+        setIsSeatChanging(false);
+        window._isSeatChanging = false;
+        return;
+      }
       
-      console.log('[Client] Seat change completed:', seatIndex);
+      // API ud638ucd9c
+      console.log(`[handleSeatChange] Calling updateSeat API - Game ${gameId}, Player ${playerId}, Seat ${seatIndex}`);
+      const apiStart = Date.now();
+      let updateSuccess = false;
+      try {
+        updateSuccess = await updateSeat(gameId, playerId, seatIndex);
+        console.log(`[handleSeatChange] updateSeat API completed in ${Date.now() - apiStart}ms with result:`, updateSuccess);
+      } catch (apiError) {
+        console.error('[handleSeatChange] updateSeat API error:', apiError);
+        toast.error('uc88cuc11d ubcc0uacbd uc624ub958: API ud638ucd9cuc911 uc624ub958 ubc1cuc0dd');
+        setIsSeatChanging(false);
+        window._isSeatChanging = false;
+        return;
+      }
       
-      // 게임 상태 새로고침
-      await fetchGameState();
-      console.log('[Client] Game state refreshed');
+      if (!updateSuccess) {
+        console.error('[handleSeatChange] API call returned false');
+        toast.error('uc88cuc11d ubcc0uacbd uc624ub958: API ud638ucd9cuc774 uc2e4ud328ud588uc2b5ub2c8ub2e4.');
+        setIsSeatChanging(false);
+        window._isSeatChanging = false;
+        return;
+      }
       
-      // 좌석 변경 상태 해제
+      // uc131uacf5 uba54uc138uc9c0
+      toast.success('uc88cuc11duc774 ubcc0uacbdub418uc5c8uc2b5ub2c8ub2e4.');
+      
+      console.log('[handleSeatChange] Seat change operation completed successfully');
+      
+      // uac8cuc784 uc0c1ud0dc uc0c8ub85cuace0uce68
+      console.log('[handleSeatChange] Refreshing game state...');
+      const fetchStart = Date.now();
+      const refreshedState = await fetchGameState();
+      console.log(`[handleSeatChange] Game state refreshed in ${Date.now() - fetchStart}ms`);
+      
+      // uac00uc838uc628 uac8cuc784 uc0c1ud0dcuc5d0uc11c ud604uc7ac ud50cub808uc774uc5b4uc758 uc88cuc11d uc815ubcf4 ud655uc778
+      if (refreshedState) {
+        const updatedPlayer = refreshedState.players.find(p => p.id === playerId);
+        console.log(`[handleSeatChange] Player seat after refresh: ${updatedPlayer?.seat_index}, expected: ${seatIndex}`);
+        
+        if (updatedPlayer && updatedPlayer.seat_index !== seatIndex) {
+          console.warn(`[handleSeatChange] Seat mismatch! DB seat: ${updatedPlayer.seat_index}, UI seat: ${seatIndex}`);
+        }
+      }
+      
+      // uc88cuc11d ubcc0uacbd uc0c1ud0dc ud574uc81c
       setTimeout(() => {
         setIsSeatChanging(false);
         window._isSeatChanging = false; // Release global state flag
-      }, 500); // 약간 지연 시간 증가
+        console.log('[handleSeatChange] Released seat changing flags');
+      }, 500); // uc57duac04 uc9c0uc5f0 uc2dcuac04 uc99duc58c
     } catch (err) {
-      console.error('[Client] Seat change error:', err);
-      toast.error('좌석을 변경할 수 없습니다. 다시 시도해주세요.');
+      console.error('[handleSeatChange] Unexpected error:', err);
+      toast.error('uc88cuc11duc744 ubcc0uacbdud560 uc218 uc5c6uc2b5ub2c8ub2e4. ub2e4uc2dc uc2dcub3c4ud574uc8fcuc138uc694.');
       
-      // 좌석 변경 상태 해제
+      // uc624ub958 ubc1cuc0dd uc2dc uc88cuc11d ubcc0uacbd uc0c1ud0dc ud574uc81c
       setIsSeatChanging(false);
       window._isSeatChanging = false;
-      
-      // 오류 시에도 게임 상태 새로고침
-      fetchGameState();
     }
   };
   
@@ -556,18 +634,20 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
           <div className="flex-grow rounded-xl overflow-hidden shadow-2xl bg-gray-900 bg-opacity-50 border border-gray-800 relative">
             <GameTable 
               gameState={gameState} 
-              currentPlayerId={playerId || ''}
+              playerId={playerId || undefined}
+              currentPlayerId={playerId || undefined}
               gameId={gameId}
-              fetchGameState={fetchGameState}
-              isObserver={isObserver}
-              onPlayerJoined={handleObserverToPlayer}
               onSeatChange={handleSeatChange}
-              isHost={isHost}
-              isReady={isReady}
+              onPlayerJoined={handleObserverToPlayer}
+              fetchGameState={fetchGameState}
               onToggleReady={handleToggleReady}
+              isReady={isReady}
               onStartGame={handleStartGame}
               isStartingGame={isStartingGame}
               canStartGame={canStart}
+              setGameState={setGameState}
+              isHost={isHost}
+              isObserver={isObserver}
             />
             
             {/* 게임 컨트롤 (오른쪽 아래에 위치) */}

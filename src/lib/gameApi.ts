@@ -1080,8 +1080,13 @@ async function handleRegame(gameId: string): Promise<void> {
  * 플레이어 좌석 업데이트 - 통합 함수
  * gameId와 roomId 모두 처리 가능하도록 개선
  */
-export async function updateSeat(gameId: string | null, playerId: string, seatIndex: number): Promise<void> {
-  console.log(`[updateSeat] Started - Game: ${gameId}, Player: ${playerId}, Seat: ${seatIndex}`);
+export async function updateSeat(
+  gameId: string | null, 
+  playerId: string, 
+  seatIndex: number,
+  roomId?: string
+): Promise<boolean> { // void 대신 boolean 반환 타입으로 변경
+  console.log(`[updateSeat] Started - Game: ${gameId}, Room: ${roomId}, Player: ${playerId}, Seat: ${seatIndex}`);
   
   try {
     // 1. 플레이어 정보 먼저 조회
@@ -1101,7 +1106,7 @@ export async function updateSeat(gameId: string | null, playerId: string, seatIn
     // 2. 현재 동일한 좌석인지 확인
     if (player.seat_index === seatIndex) {
       console.log('[updateSeat] Player already in the requested seat. No change needed.');
-      return;
+      return true; // 이미 동일한 좌석이면 성공으로 처리
     }
     
     // 3. 게임 상태 확인 - 게임이 있는 경우에만 대기 상태 확인
@@ -1124,7 +1129,9 @@ export async function updateSeat(gameId: string | null, playerId: string, seatIn
     }
     
     // 4. 좌석이 이미 다른 플레이어에게 점유되었는지 확인
-    const isOccupied = await isSeatOccupied(seatIndex, playerId, gameId || undefined, player.room_id || undefined);
+    // roomIdub97c ud30cub77cubbf8ud130ub85c ucd94uac00ud558uace0, ud734uc6a9uc131 uac1cuc120uc744 uc704ud574 uc77cuad00uc131 uc788ub294 ub85cuc9c1 uc801uc6a9
+    const effectiveRoomId = roomId || player.room_id;
+    const isOccupied = await isSeatOccupied(seatIndex, playerId, gameId || undefined, effectiveRoomId || undefined);
 
     if (isOccupied) {
       console.error(`[updateSeat] Seat ${seatIndex} is already taken by another player`);
@@ -1132,39 +1139,43 @@ export async function updateSeat(gameId: string | null, playerId: string, seatIn
     }
 
     // 5. 좌석 업데이트 - 항상 단일 업데이트 쿼리 사용
-    console.log('[updateSeat] Updating seat in database:', {playerId, seatIndex});
+    console.log('[updateSeat] Updating seat in database:', {playerId, seatIndex, gameId, roomId: effectiveRoomId});
     
-    const updateBuilder = supabase
+    let updateBuilder = supabase
       .from('players')
       .update({ seat_index: seatIndex })
       .eq('id', playerId);
       
-    // 적절한 필터 추가 (gameId 또는 roomId)
-    if (gameId) {
-      updateBuilder.eq('game_id', gameId);
+    // uc801uc808ud55c ud544ud130 ucd94uac00 (gameId ub610ub294 roomId)
+    // ud50cub808uc774uc5b4 ub808ucf54ub4dcuc5d0 uc788ub294 game_id, room_idub97c uae30uc900uc73cub85c uc0acuc6a9
+    if (player.game_id) {
+      updateBuilder = updateBuilder.eq('game_id', player.game_id);
     }
-    if (player.room_id) {
-      updateBuilder.eq('room_id', player.room_id);
-    }
-    
-    const { error: updateError } = await updateBuilder;
-
-    if (updateError) {
-      console.error('[updateSeat] Database update error:', updateError);
-      throw handleDatabaseError(updateError, 'updateSeat:db_update');
+    if (effectiveRoomId) {
+      updateBuilder = updateBuilder.eq('room_id', effectiveRoomId);
     }
     
-    // 6. localStorage 업데이트
-    if (gameId) {
-      localStorage.setItem(`game_${gameId}_seat_index`, String(seatIndex));
+    // uc2e4uc81c DB uc5c5ub370uc774ud2b8 uc2e4ud589 - ubc18ub4dcuc2dc await ud544uc694
+    const { data, error, count } = await updateBuilder;
+    
+    if (error) {
+      console.error('[updateSeat] Database update error:', error);
+      throw handleDatabaseError(error, 'updateSeat:db_update');
+    }
+    
+    console.log(`[updateSeat] Success! Updated ${count} rows:`, data);
+    
+    // 6. localStorage uc5c5ub370uc774ud2b8
+    if (player.game_id) {
+      localStorage.setItem(`game_${player.game_id}_seat_index`, String(seatIndex));
       console.log('[updateSeat] Game seat localStorage updated');
     }
-    if (player.room_id) {
-      localStorage.setItem(`room_${player.room_id}_seat_index`, String(seatIndex));
+    if (effectiveRoomId) {
+      localStorage.setItem(`room_${effectiveRoomId}_seat_index`, String(seatIndex));
       console.log('[updateSeat] Room seat localStorage updated');
     }
     
-    // 7. 업데이트 검증 (디버깅용)
+    // 7. uc5c5ub370uc774ud2b8 uac80uc99d (ub514ubc84uae45uc6a9)
     const { data: updatedPlayer } = await supabase
       .from('players')
       .select('id, username, seat_index, room_id, game_id')
@@ -1173,6 +1184,7 @@ export async function updateSeat(gameId: string | null, playerId: string, seatIn
       
     console.log('[updateSeat] Player after update:', updatedPlayer);
     console.log('[updateSeat] Seat update successful!');
+    return true; // 성공적으로 업데이트되었으므로 true 반환
   } catch (err) {
     console.error('[updateSeat] Exception occurred:', err);
     throw err;
@@ -1482,7 +1494,7 @@ export async function handleBettingTimeout(gameId: string): Promise<void> {
       throw handleDatabaseError(gameError, 'handleBettingTimeout');
     }
     
-    // 게임이 플레이 중이 아니거나, 현재 턴 플레이어가 없으면 처리 중단
+    // 게임이 진행 중이 아니거나, 현재 턴 플레이어가 없으면 처리 중단
     if (game.status !== 'playing' || !game.current_turn) {
       return;
     }
@@ -2155,7 +2167,7 @@ export async function findEmptySeat(gameId?: string, roomId?: string): Promise<n
       .from('players')
       .select('seat_index');
     
-    // gameId ub610ub294 roomId ucc98ub9ac
+    // gameIdub098 roomId ucc98ub9ac
     if (gameId) {
       queryBuilder.eq('game_id', gameId);
     }
@@ -2170,10 +2182,10 @@ export async function findEmptySeat(gameId?: string, roomId?: string): Promise<n
       throw handleDatabaseError(error, 'findEmptySeat');
     }
     
-    // ucd5cub300 ud50cub808uc774uc5b4uac00 uc544ub2cc ub2e4ub978 ud50cub808uc774uc5b4uac00 uc88cuc11duc744 uc810uc720ud558uace0 uc788ub294uc9c0 ud655uc778
+    // ud604uc7ac ud50cub808uc774uc5b4uac00 uc544ub2cc ub2e4ub978 ud50cub808uc774uc5b4uac00 uc88cuc11duc744 uc810uc720ud558uace0 uc788ub294uc9c0 ud655uc778
     const maxPlayers = 5;
     
-    // uc774ubbf8 uc0acuc6a9uc911uc778 uc88cuc11d ubc88ud638ub4e4
+    // uc774ubbf8 uc0acuc6a9uc911uc778 uc88cuc11d ubc88ud638ub4e4 - ucffcub9ac uacb0uacfcuc5d0uc11c uacc4uc0b0ub418ub3c4ub85d uc218uc815
     const occupiedSeats = players
       ? players.map(p => p.seat_index).filter(s => s !== null && s !== undefined)
       : [];

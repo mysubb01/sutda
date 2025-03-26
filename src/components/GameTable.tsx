@@ -14,39 +14,49 @@ import { BettingTimer } from './BettingTimer';
 
 interface GameTableProps {
   gameState: GameState;
-  currentPlayerId: string;
-  gameId: string;
-  fetchGameState: () => void;
+  playerId?: string;
+  currentPlayerId?: string;
+  gameId?: string;
   isObserver?: boolean;
-  onPlayerJoined?: (newPlayerId: string, newUsername: string) => void;
-  onSeatChange?: (seatIndex: number) => Promise<void>;
   isHost?: boolean;
-  isReady?: boolean;
+  onSeatChange?: (seatIndex: number) => Promise<void>;
+  onAddPlayer?: (seatIndex: number, username: string) => Promise<void>;
+  onPlayerJoined?: (newPlayerId: string, newUsername: string) => void;
+  onRevealCards?: () => Promise<void>;
+  onAction?: (action: string, amount?: number) => Promise<void>;
+  fetchGameState?: () => Promise<GameState | null>;
   onToggleReady?: () => Promise<void>;
+  isReady?: boolean;
   onStartGame?: () => Promise<void>;
   isStartingGame?: boolean;
   canStartGame?: {canStart: boolean, message: string};
+  setGameState?: (newGameState: GameState) => void;
 }
 
 export function GameTable({ 
   gameState, 
+  playerId, 
   currentPlayerId, 
-  gameId, 
-  fetchGameState,
+  gameId,
   isObserver = false,
-  onPlayerJoined,
-  onSeatChange,
   isHost = false,
-  isReady = false,
+  onSeatChange,
+  onAddPlayer,
+  onPlayerJoined,
+  onRevealCards,
+  onAction,
+  fetchGameState,
   onToggleReady,
+  isReady = false,
   onStartGame,
   isStartingGame = false,
-  canStartGame = {canStart: false, message: ''}
+  canStartGame = {canStart: false, message: ''},
+  setGameState
 }: GameTableProps) {
   const [showCards, setShowCards] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
   const [joinSlot, setJoinSlot] = useState<number | null>(null);
-  const [username, setUsername] = useState('');
+  const [nickname, setNickname] = useState('');
   const [showNicknameModal, setShowNicknameModal] = useState(false);
   const [selectedSeat, setSelectedSeat] = useState<number | null>(null);
   const [isJoining, setIsJoining] = useState(false);
@@ -159,12 +169,15 @@ export function GameTable({
     });
   }, [gameState, currentPlayerId, showCards]);
   
-  // 비어있는 자리 계산 (게임이 대기 중일 때만 참가 가능)
-  const emptySlots = gameState.status === 'waiting' 
-    ? Array.from({ length: maxPlayers }, (_, i) => i)
-      .filter(seatIndex => !gameState.players.some(player => player.seat_index === seatIndex))
-    : [];
+  // 비어있는 자리 계산 (useMemo 훅으로 감싸기)
+  const emptySlots = useMemo(() => {
+    if (gameState.status !== 'waiting') return [];
     
+    // 비어있는 자리 목록 계산
+    return Array.from({ length: maxPlayers }, (_, i) => i)
+      .filter(seatIndex => !gameState.players.some(player => player.seat_index === seatIndex));
+  }, [gameState.players, gameState.status, maxPlayers]);
+  
   // 디버깅용 로그
   console.log('GameTable 정보:', {
     플레이어수: playerCount,
@@ -174,9 +187,143 @@ export function GameTable({
     준비상태: isReady
   });
 
+  // 좌석 클릭 핸들러
+  const handleSeatClick = async (seatIndex: number) => {
+    if (!seatIndex && seatIndex !== 0) {
+      console.error('[GameTable] Invalid seat index:', seatIndex);
+      return;
+    }
+    
+    console.log(`[GameTable] Seat clicked: ${seatIndex}, Current state:`, { 
+      gameId,
+      isObserver, 
+      currentPlayer: currentPlayer ? { 
+        id: currentPlayer.id, 
+        seat: currentPlayer.seat_index,
+        name: currentPlayer.username 
+      } : null,
+      allPlayers: gameState.players.map(p => ({ id: p.id, seat_index: p.seat_index }))
+    });
+    
+    // 게임이 진행 중인 경우 자리 이동 불가
+    if (gameState.status !== 'waiting') {
+      toast.error('게임이 진행 중일 때는 자리를 이동할 수 없습니다.');
+      return;
+    }
+    
+    // 이미 참가한 플레이어인 경우, 자리 이동 처리
+    if (currentPlayer && onSeatChange) {
+      try {
+        // 이미 다른 플레이어가 해당 자리에 있는지 확인
+        const isOccupied = gameState.players.some(p => 
+          p.id !== currentPlayer.id && p.seat_index === seatIndex
+        );
+        
+        if (isOccupied) {
+          console.log(`[GameTable] Seat ${seatIndex} is already taken by another player`);
+          toast.error('이미 다른 플레이어가 선택한 좌석에 있습니다.');
+          return;
+        }
+        
+        // 현재 같은 자리에 있는지 확인
+        if (currentPlayer.seat_index === seatIndex) {
+          console.log('[GameTable] Already sitting in this seat');
+          toast.error('이미 해당 좌석에 앉아있습니다.');
+          return;
+        }
+        
+        // DB 업데이트 전 상태 기록
+        const previousSeatIndex = currentPlayer.seat_index;
+        console.log(`[GameTable] Moving player from seat ${previousSeatIndex} to ${seatIndex}`);
+        
+        // UI 즉시 반영 (낙관적 업데이트)
+        console.log('[GameTable] Starting optimistic UI update - Original players:', JSON.stringify(gameState.players));
+        
+        const newPlayers = [...gameState.players];
+        const playerIndex = newPlayers.findIndex(p => p.id === currentPlayer.id);
+        
+        if (playerIndex >= 0) {
+          const updatedPlayer = { 
+            ...newPlayers[playerIndex], 
+            seat_index: seatIndex 
+          };
+          
+          console.log('[GameTable] Optimistic UI update:', { 
+            playerId: updatedPlayer.id,
+            oldSeat: newPlayers[playerIndex].seat_index,
+            newSeat: updatedPlayer.seat_index,
+          });
+          
+          newPlayers[playerIndex] = updatedPlayer;
+          console.log('[GameTable] Players array after update:', JSON.stringify(newPlayers));
+          
+          // 낙관적 업데이트 - 새 게임 상태 생성
+          const newGameState = {
+            ...gameState,
+            players: newPlayers
+          };
+          
+          // 상태 업데이트 함수가 있다면 호출
+          if (typeof setGameState === 'function') {
+            console.log('[GameTable] Updating gameState with new player positions');
+            setGameState(newGameState);
+            console.log('[GameTable] GameState updated locally');
+          } else {
+            console.warn('[GameTable] setGameState is not available, skipping optimistic update');
+          }
+        } else {
+          console.warn(`[GameTable] Player ${currentPlayer.id} not found in gameState.players array`);
+        }
+        
+        // API 호출
+        console.log(`[GameTable] Calling onSeatChange API for seat ${seatIndex}`);
+        const apiStart = Date.now();
+        await onSeatChange(seatIndex);
+        console.log(`[GameTable] API call completed in ${Date.now() - apiStart}ms`);
+        
+        // UI 업데이트 완료 표시
+        toast.success('자리를 이동했습니다!');
+        
+        // 게임 상태 새로고침 (fetchGameState가 있는 경우에만 호출)
+        console.log('[GameTable] Refreshing game state...');
+        if (typeof fetchGameState === 'function') {
+          const fetchStart = Date.now();
+          const refreshedState = await fetchGameState();
+          console.log(`[GameTable] Game state refreshed in ${Date.now() - fetchStart}ms`);
+          console.log('[GameTable] Refreshed player data:', refreshedState?.players.map(p => ({ 
+            id: p.id, 
+            seat_index: p.seat_index 
+          })));
+        }
+      } catch (error) {
+        console.error('[GameTable] Seat change error:', error);
+        toast.error('자리 이동 중 오류가 발생했습니다.');
+      }
+    } else {
+      // 신규 플레이어인 경우, 닉네임 입력 모달에 자리 번호 전달
+      setSelectedSeat(seatIndex);
+      setShowNicknameModal(true);
+    }
+  };
+
+  // 카드 공개 함수
+  const handleRevealCard = () => {
+    if (typeof onRevealCards === 'function') {
+      onRevealCards();
+    } else {
+      console.warn('[GameTable] onRevealCards function is not available');
+    }
+  };
+
   // 게임 재시작 함수
   const handleRestartGame = async () => {
     try {
+      if (!gameId) {
+        console.error('[GameTable] Cannot restart game: gameId is undefined');
+        toast.error('게임 ID가 없습니다.');
+        return;
+      }
+
       // 플레이어의 잔액 확인 (최소 2000원 이상 필요)
       const player = gameState?.players.find(p => p.id === currentPlayerId);
       if (!player || player.balance < 2000) {
@@ -191,146 +338,89 @@ export function GameTable({
       toast.success('새 게임이 시작되었습니다.');
       
       // 게임 상태 새로고침
-      fetchGameState();
+      if (typeof fetchGameState === 'function') {
+        await fetchGameState();
+      } else {
+        console.warn('[GameTable] fetchGameState is not available, skipping game state refresh');
+      }
     } catch (error) {
       console.error('게임 재시작 오류:', error);
       toast.error('게임을 재시작할 수 없습니다.');
     }
   };
 
-  // 빈 자리 클릭 핸들러
-  const handleSeatClick = async (seatIndex: number) => {
-    if (!seatIndex && seatIndex !== 0) {
-      console.error('[GameTable] Invalid seat index:', seatIndex);
-      return;
-    }
-    
-    console.log('[GameTable] Seat clicked:', seatIndex, 'Current player:', currentPlayer);
-    
-    // 게임이 진행 중인 경우 자리 이동 불가
-    if (gameState.status !== 'waiting') {
-      toast.error('게임이 진행 중일 때는 자리를 이동할 수 없습니다.');
-      return;
-    }
-    
-    // 이미 참가한 플레이어인 경우, 자리 이동 처리
-    if (currentPlayer && onSeatChange) {
-      try {
-        console.log(`[GameTable] Attempting to move player to seat ${seatIndex}`);
-        
-        // 이미 다른 플레이어가 해당 자리에 있는지 확인
-        const seatTaken = gameState.players.some(
-          p => p.seat_index === seatIndex && p.id !== currentPlayer.id
-        );
-        
-        if (seatTaken) {
-          console.error('[GameTable] Seat already taken by another player');
-          toast.error('이미 다른 플레이어가 사용 중인 좌석입니다.');
-          return;
-        }
-        
-        // 현재 같은 자리에 있는지 확인
-        if (currentPlayer.seat_index === seatIndex) {
-          console.log('[GameTable] Already sitting in this seat');
-          toast.error('이미 해당 좌석에 앉아있습니다.');
-          return;
-        }
-        
-        // UI 즉시 반영 (낙관적 업데이트)
-        const newPlayers = [...gameState.players];
-        const playerIndex = newPlayers.findIndex(p => p.id === currentPlayer.id);
-        if (playerIndex >= 0) {
-          console.log(`[GameTable] Updating UI - Player ${currentPlayer.id} moving from seat ${newPlayers[playerIndex].seat_index} to ${seatIndex}`);
-          newPlayers[playerIndex] = { ...newPlayers[playerIndex], seat_index: seatIndex };
-          // setGameState(prev => ({
-          //   ...prev,
-          //   players: newPlayers
-          // }));
-        }
-        
-        // API 호출
-        await onSeatChange(seatIndex);
-        console.log('[GameTable] Seat change API call completed');
-        
-        // 게임 상태 새로고침
-        await fetchGameState();
-        console.log('[GameTable] Game state refreshed after seat change');
-        
-        toast.success('자리를 이동했습니다!');
-      } catch (error) {
-        console.error('[GameTable] Seat change error:', error);
-        toast.error('자리를 이동할 수 없습니다. 다시 시도해주세요.');
-        // 오류 발생 시 게임 상태 새로고침하여 일관성 유지
-        fetchGameState();
-      }
+  // 베팅 액션 핸들러 (콜, 체크, 레이즈, 폴드 등)
+  const handleAction = (action: string, amount?: number) => {
+    if (typeof onAction === 'function') {
+      onAction(action, amount);
     } else {
-      // 신규 플레이어인 경우, 닉네임 입력 모달 표시
-      setSelectedSeat(seatIndex);
-      setShowNicknameModal(true);
+      console.warn(`[GameTable] onAction function is not available for ${action}`);
+    }
+  };
+
+  const handleJoinGame = async (seatIndex: number, playerName: string) => {
+    try {
+      if (!gameId) {
+        console.error('[GameTable] Cannot join game: gameId is undefined');
+        toast.error('게임 ID가 없습니다.');
+        return null;
+      }
+      
+      console.log(`[GameTable] Joining game ${gameId} with name ${playerName} at seat ${seatIndex}`);
+      return await joinGame(gameId, playerName, seatIndex);
+    } catch (error) {
+      console.error('[GameTable] Error joining game:', error);
+      toast.error('게임 참가 중 오류가 발생했습니다.');
+      return null;
     }
   };
 
   // 닉네임 입력 후 참가하기
   const handleJoinWithNickname = async () => {
     if (!selectedSeat && selectedSeat !== 0) {
-      toast.error('선택된 좌석이 없습니다.');
+      console.error('[GameTable] No seat selected for join');
       return;
     }
     
-    if (!username.trim()) {
+    if (!nickname.trim()) {
       toast.error('닉네임을 입력해주세요.');
       return;
     }
-    
+
     try {
-      setIsJoining(true);
-      console.log(`참가 시도: 좌석 ${selectedSeat}, 닉네임 ${username}`);
-      
-      // 비동기 작업 시작 전 메시지 표시
-      toast.loading('게임에 참가 중입니다...', { id: 'joining' });
-      
-      // 비동기 작업 실행
-      const response = await joinGame(gameId, username, selectedSeat);
-      const { playerId } = response;
-      
-      // 성공 시 로컬 스토리지에 플레이어 정보 저장
-      localStorage.setItem(`game_${gameId}_player_id`, playerId);
-      localStorage.setItem(`game_${gameId}_username`, username);
-      localStorage.setItem(`game_${gameId}_seat_index`, String(selectedSeat));
-      
-      // 성공 메시지 표시
-      toast.success('게임에 참가했습니다!', { id: 'joining' });
-      
-      // 모달 닫기
-      setShowNicknameModal(false);
-      
-      // 상태 업데이트 전 약간의 딜레이
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      // 부모 컴포넌트에 참가 알림
-      if (onPlayerJoined) {
-        onPlayerJoined(playerId, username);
+      if (!currentPlayerId) {
+        // 게임 참가 함수 호출
+        const result = await handleJoinGame(selectedSeat, nickname);
+        
+        if (result?.playerId) {
+          console.log(`[GameTable] Successfully joined game with player ID: ${result.playerId}`);
+          
+          // onPlayerJoined callback (if available)
+          if (typeof onPlayerJoined === 'function') {
+            onPlayerJoined(result.playerId, nickname);
+          } else {
+            console.warn('[GameTable] onPlayerJoined is not available, skipping callback');
+          }
+          
+          // Refresh game state
+          if (typeof fetchGameState === 'function') {
+            await fetchGameState();
+          } else {
+            console.warn('[GameTable] fetchGameState is not available, skipping refresh');
+          }
+          
+          toast.success('게임에 참가했습니다!');
+        }
+      } else {
+        console.error('[GameTable] Already has a currentPlayerId, cannot join again');
       }
-      
-      // 게임 상태 새로고침
-      fetchGameState();
     } catch (error) {
-      console.error('참가 오류:', error);
-      
-      // 실패 메시지 표시
-      toast.error('게임에 참가할 수 없습니다. 다시 시도해주세요.', { id: 'joining' });
-      
-      // 에러 세부사항에 따른 구체적인 메시지 표시
-      const errorMessage = error instanceof Error ? error.message : '알 수 없는 오류';
-      if (errorMessage.includes('INVALID_STATE')) {
-        toast.error('현재 게임에 참가할 수 없습니다. 게임이 이미 시작되었을 수 있습니다.');
-      } else if (errorMessage.includes('DB_ERROR')) {
-        toast.error('데이터베이스 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
-      }
-    } finally {
-      // 상태 정리
-      setIsJoining(false);
+      console.error('[GameTable] Join error:', error);
+      toast.error('게임에 참가할 수 없습니다.');
     }
+    
+    // 닉네임 입력 모달 닫기
+    setShowNicknameModal(false);
   };
 
   return (
@@ -434,6 +524,15 @@ export function GameTable({
                   try {
                     // 시간 초과 시 현재 플레이어가 나인지 확인
                     if (gameState.currentTurn === currentPlayerId) {
+                      if (!gameId) {
+                        console.error('[GameTable] Cannot place bet: gameId is undefined');
+                        return;
+                      }
+                      if (!currentPlayerId) {
+                        console.error('[GameTable] Cannot place bet: currentPlayerId is undefined');
+                        return;
+                      }
+                      
                       // 자동으로 다이 처리
                       await import('@/lib/gameApi').then(async ({ placeBet }) => {
                         try {
@@ -442,19 +541,12 @@ export function GameTable({
                           toast.success('시간 초과로 자동 다이 처리되었습니다.');
                         } catch (betError: any) {
                           console.error('다이 처리 오류:', betError);
-                          toast.error(`다이 처리 오류: ${betError?.message || '알 수 없는 오류가 발생했습니다.'}`);
-                        } finally {
-                          // 게임 상태 새로고침
-                          fetchGameState();
+                          toast.error('다이 처리 중 오류가 발생했습니다.');
                         }
                       });
-                    } else {
-                      // 다른 플레이어의 턴이 만료되었을 때는 게임 상태만 새로고침
-                      fetchGameState();
                     }
-                  } catch (error: any) {
-                    console.error('시간 초과 처리 오류:', error);
-                    toast.error(`시간 초과 처리 오류: ${error?.message || '알 수 없는 오류가 발생했습니다.'}`);
+                  } catch (error) {
+                    console.error('베팅 시간 초과 처리 중 오류:', error);
                   }
                 }}
               />
@@ -556,8 +648,8 @@ export function GameTable({
                     <label className="block text-sm font-medium text-gray-300 mb-1">닉네임</label>
                     <input 
                       type="text" 
-                      value={username} 
-                      onChange={(e) => setUsername(e.target.value)} 
+                      value={nickname} 
+                      onChange={(e) => setNickname(e.target.value)} 
                       placeholder="닉네임을 입력하세요"
                       className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700 focus:border-yellow-500 focus:outline-none"
                       autoFocus
@@ -573,9 +665,9 @@ export function GameTable({
                     </button>
                     <button 
                       onClick={handleJoinWithNickname} 
-                      disabled={isJoining || !username.trim()}
+                      disabled={isJoining || !nickname.trim()}
                       className={`px-4 py-2 rounded font-medium ${
-                        isJoining || !username.trim()
+                        isJoining || !nickname.trim()
                           ? 'bg-gray-600 cursor-not-allowed text-gray-400' 
                           : 'bg-yellow-600 hover:bg-yellow-700 text-white'}`}
                     >
