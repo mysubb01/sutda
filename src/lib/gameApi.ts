@@ -1089,10 +1089,10 @@ export async function updateSeat(
   console.log(`[updateSeat] Started - Game: ${gameId}, Room: ${roomId}, Player: ${playerId}, Seat: ${seatIndex}`);
   
   try {
-    // 1. 플레이어 정보 먼저 조회
+    // 1. 플레이어 정보 먼저 조회 (더 많은 정보 가져오기)
     const { data: player, error: playerError } = await supabase
       .from('players')
-      .select('seat_index, room_id, game_id')
+      .select('*') // 모든 필드 가져오기 (username, balance 등 포함)
       .eq('id', playerId)
       .single();
 
@@ -1129,7 +1129,6 @@ export async function updateSeat(
     }
     
     // 4. 좌석이 이미 다른 플레이어에게 점유되었는지 확인
-    // roomIdub97c ud30cub77cubbf8ud130ub85c ucd94uac00ud558uace0, ud734uc6a9uc131 uac1cuc120uc744 uc704ud574 uc77cuad00uc131 uc788ub294 ub85cuc9c1 uc801uc6a9
     const effectiveRoomId = roomId || player.room_id;
     const isOccupied = await isSeatOccupied(seatIndex, playerId, gameId || undefined, effectiveRoomId || undefined);
 
@@ -1143,11 +1142,18 @@ export async function updateSeat(
     
     let updateBuilder = supabase
       .from('players')
-      .update({ seat_index: seatIndex })
+      .update({ 
+        seat_index: seatIndex,
+        // 모든 중요 정보 유지 (명시적으로 포함)
+        username: player.username,
+        balance: player.balance,
+        user_id: player.user_id,
+        is_ready: player.is_ready,
+        is_die: player.is_die
+      })
       .eq('id', playerId);
       
-    // uc801uc808ud55c ud544ud130 ucd94uac00 (gameId ub610ub294 roomId)
-    // ud50cub808uc774uc5b4 ub808ucf54ub4dcuc5d0 uc788ub294 game_id, room_idub97c uae30uc900uc73cub85c uc0acuc6a9
+    // 적절한 필터 추가 (gameId 또는 roomId)
     if (player.game_id) {
       updateBuilder = updateBuilder.eq('game_id', player.game_id);
     }
@@ -1155,7 +1161,7 @@ export async function updateSeat(
       updateBuilder = updateBuilder.eq('room_id', effectiveRoomId);
     }
     
-    // uc2e4uc81c DB uc5c5ub370uc774ud2b8 uc2e4ud589 - ubc18ub4dcuc2dc await ud544uc694
+    // 실제 DB 업데이트 실행 - 반드시 await 필요
     const { data, error, count } = await updateBuilder;
     
     if (error) {
@@ -1165,7 +1171,7 @@ export async function updateSeat(
     
     console.log(`[updateSeat] Success! Updated ${count} rows:`, data);
     
-    // 6. localStorage uc5c5ub370uc774ud2b8
+    // 6. localStorage 업데이트
     if (player.game_id) {
       localStorage.setItem(`game_${player.game_id}_seat_index`, String(seatIndex));
       console.log('[updateSeat] Game seat localStorage updated');
@@ -1175,10 +1181,10 @@ export async function updateSeat(
       console.log('[updateSeat] Room seat localStorage updated');
     }
     
-    // 7. uc5c5ub370uc774ud2b8 uac80uc99d (ub514ubc84uae45uc6a9)
+    // 7. 업데이트 검증 (디버깅용)
     const { data: updatedPlayer } = await supabase
       .from('players')
-      .select('id, username, seat_index, room_id, game_id')
+      .select('*') // 모든 필드 체크 (username, balance 등 포함)
       .eq('id', playerId)
       .single();
       
@@ -2112,31 +2118,34 @@ export async function cleanupAfterGameFinish(gameId: string): Promise<void> {
 }
 
 /**
- * 채팅 메시지 전송
+ * 채팅 메시지 전송 함수
+ * 
+ * 참고: 데이터베이스 스키마에서
+ * - messages 테이블은 'user_id' 필드를 사용합니다
+ * - 여기서는 player의 id를 user_id로 전달합니다
  */
 export async function sendMessage(gameId: string, playerId: string, message: string): Promise<void> {
+  console.log(`[sendMessage] Game: ${gameId}, Player: ${playerId}, Message: ${message}`);
+  
   try {
-    console.log(`[sendMessage] Game: ${gameId}, Player: ${playerId}, Message: ${message}`);
-    
-    // 1. 플레이어 정보 확인
+    // 1. 플레이어 정보 가져오기
     const { data: player, error: playerError } = await supabase
       .from('players')
       .select('username')
       .eq('id', playerId)
-      .eq('game_id', gameId)
       .single();
     
     if (playerError || !player) {
-      console.error('[sendMessage] Player info query error:', playerError);
+      console.error('[sendMessage] Player not found for ID:', playerId);
       throw handleDatabaseError(playerError, 'sendMessage:player_query');
     }
     
-    // 2. 메시지 저장
+    // 2. 메시지 저장 - 데이터베이스 스키마에 맞춰 user_id 필드 사용
     const { error: messageError } = await supabase
       .from('messages')
       .insert({
         game_id: gameId,
-        player_id: playerId,
+        user_id: playerId,  // 데이터베이스 스키마에 맞게 player's id를 user_id 필드에 저장
         username: player.username,
         content: message,
         created_at: new Date().toISOString()
@@ -2162,11 +2171,10 @@ export async function findEmptySeat(gameId?: string, roomId?: string): Promise<n
   console.log(`[findEmptySeat] Finding empty seat - Game: ${gameId}, Room: ${roomId}`);
   
   try {
-    // uc88cuc11d uc870ud68cub97c uc704ud55c ucffcub9ac ube4cub354
     const queryBuilder = supabase
       .from('players')
       .select('seat_index');
-    
+      
     // gameIdub098 roomId ucc98ub9ac
     if (gameId) {
       queryBuilder.eq('game_id', gameId);
@@ -2174,24 +2182,24 @@ export async function findEmptySeat(gameId?: string, roomId?: string): Promise<n
     if (roomId) {
       queryBuilder.eq('room_id', roomId);
     }
-    
+      
     const { data: players, error } = await queryBuilder;
-    
+      
     if (error) {
       console.error('[findEmptySeat] Database query error:', error);
       throw handleDatabaseError(error, 'findEmptySeat');
     }
-    
+      
     // ud604uc7ac ud50cub808uc774uc5b4uac00 uc544ub2cc ub2e4ub978 ud50cub808uc774uc5b4uac00 uc88cuc11duc744 uc810uc720ud558uace0 uc788ub294uc9c0 ud655uc778
     const maxPlayers = 5;
-    
+      
     // uc774ubbf8 uc0acuc6a9uc911uc778 uc88cuc11d ubc88ud638ub4e4 - ucffcub9ac uacb0uacfcuc5d0uc11c uacc4uc0b0ub418ub3c4ub85d uc218uc815
     const occupiedSeats = players
       ? players.map(p => p.seat_index).filter(s => s !== null && s !== undefined)
       : [];
-      
+        
     console.log('[findEmptySeat] Occupied seats:', occupiedSeats);
-    
+      
     // ube48 uc88cuc11d ucc3euae30 (0ubd80ud130 maxPlayers-1uae4cuc9c0 ud655uc778)
     for (let i = 0; i < maxPlayers; i++) {
       if (!occupiedSeats.includes(i)) {
@@ -2199,7 +2207,7 @@ export async function findEmptySeat(gameId?: string, roomId?: string): Promise<n
         return i;
       }
     }
-    
+      
     // ubaa8ub4e0 uc88cuc11duc774 ucc28uc788uc73cuba74 null ubc18ud658
     console.log('[findEmptySeat] No empty seats available');
     return null;
@@ -2234,16 +2242,16 @@ export async function isSeatOccupied(
     if (roomId) {
       queryBuilder.eq('room_id', roomId);
     }
-    
+      
     const { data: existingSeat, error } = await queryBuilder;
 
     if (error) {
       console.error('[isSeatOccupied] Database query error:', error);
       throw handleDatabaseError(error, 'isSeatOccupied');
     }
-    
+      
     console.log('[isSeatOccupied] Seat check result:', existingSeat);
-    
+      
     // ud604uc7ac ud50cub808uc774uc5b4uac00 uc544ub2cc ub2e4ub978 ud50cub808uc774uc5b4uac00 uc88cuc11duc744 uc810uc720ud558uace0 uc788ub294uc9c0 ud655uc778
     return existingSeat && existingSeat.length > 0 && existingSeat[0].id !== playerId;
   } catch (err) {

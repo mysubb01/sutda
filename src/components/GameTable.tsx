@@ -57,7 +57,7 @@ export function GameTable({
   const [hasStarted, setHasStarted] = useState(false);
   const [joinSlot, setJoinSlot] = useState<number | null>(null);
   const [nickname, setNickname] = useState('');
-  const [showNicknameModal, setShowNicknameModal] = useState(false);
+  const [isNicknameDialogOpen, setIsNicknameDialogOpen] = useState(false);
   const [selectedSeat, setSelectedSeat] = useState<number | null>(null);
   const [isJoining, setIsJoining] = useState(false);
 
@@ -163,7 +163,7 @@ export function GameTable({
         position: relativePosition,
         isMe: player.id === currentUserId,
         isCurrentTurn: gameState.currentTurn === player.id,
-        isDead: player.is_die === true,
+        is_die: player.is_die === true,
         cards: cardStatus
       };
     });
@@ -189,127 +189,104 @@ export function GameTable({
 
   // 좌석 클릭 핸들러
   const handleSeatClick = async (seatIndex: number) => {
-    if (!seatIndex && seatIndex !== 0) {
-      console.error('[GameTable] Invalid seat index:', seatIndex);
+    console.log(`[handleSeatClick] Seat ${seatIndex} clicked. Current state: isObserver=${isObserver}, playerId=${playerId}, currentPlayer=`, currentPlayer);
+    
+    // 해당 좌석에 플레이어가 있는지 확인
+    const playerInSeat = gameState.players.find((p) => p.seat_index === seatIndex);
+    
+    // 이미 해당 자리에 플레이어가 있으면 무시
+    if (playerInSeat) {
+      console.log(`[handleSeatClick] Seat ${seatIndex} is already occupied by ${playerInSeat.username}`);
       return;
     }
     
-    console.log(`[GameTable] Seat clicked: ${seatIndex}, Current state:`, { 
-      gameId,
-      isObserver, 
-      currentPlayer: currentPlayer ? { 
-        id: currentPlayer.id, 
-        seat: currentPlayer.seat_index,
-        name: currentPlayer.username 
-      } : null,
-      allPlayers: gameState.players.map(p => ({ id: p.id, seat_index: p.seat_index }))
-    });
-    
-    // 게임이 진행 중인 경우 자리 이동 불가
+    // 게임이 대기 상태가 아니면 좌석 변경 불가
     if (gameState.status !== 'waiting') {
-      toast.error('게임이 진행 중일 때는 자리를 이동할 수 없습니다.');
+      console.log('[handleSeatClick] Cannot change seats - game is not in waiting state');
+      toast.error('게임이 시작되면 좌석을 변경할 수 없습니다');
+      return;
+    }
+
+    // 관찰자 모드일 때 처리
+    if (isObserver) {
+      console.log('[handleSeatClick] Observer is selecting a seat - opening nickname dialog');
+      setSelectedSeat(seatIndex);
+      setIsNicknameDialogOpen(true);
       return;
     }
     
-    // 이미 참가한 플레이어인 경우, 자리 이동 처리
-    if (currentPlayer && onSeatChange) {
-      try {
-        // 이미 다른 플레이어가 해당 자리에 있는지 확인
-        const isOccupied = gameState.players.some(p => 
-          p.id !== currentPlayer.id && p.seat_index === seatIndex
-        );
+    // 현재 플레이어가 있거나 방장인 경우 좌석 변경 처리
+    if (!onSeatChange) {
+      console.error('[GameTable] onSeatChange function is not defined');
+      toast.error('자리 이동 중 오류가 발생했습니다.');
+      return;
+    }
+
+    try {
+      console.log(`[GameTable] Calling onSeatChange API for seat ${seatIndex}`);
+      
+      // 플레이어 ID 결정 (playerId 또는 currentPlayer의 ID)
+      const playerIdToUse = playerId || (currentPlayer ? currentPlayer.id : null);
+      
+      if (!playerIdToUse && !isHost) {
+        console.error('[GameTable] Cannot determine player ID for seat change');
+        toast.error('플레이어 정보를 찾을 수 없습니다.');
+        return;
+      }
+      
+      // 이전 좌석 정보 저장
+      let previousSeat = -1;
+      
+      if (setGameState && gameState.players) {
+        const currentPlayerInState = gameState.players.find(p => {
+          if (isHost && !playerIdToUse) {
+            return p.seat_index === 0; // 방장이고 playerId가 없으면 첫 번째 자리와 매칭
+          }
+          return p.id === playerIdToUse;
+        });
         
-        if (isOccupied) {
-          console.log(`[GameTable] Seat ${seatIndex} is already taken by another player`);
-          toast.error('이미 다른 플레이어가 선택한 좌석에 있습니다.');
-          return;
-        }
-        
-        // 현재 같은 자리에 있는지 확인
-        if (currentPlayer.seat_index === seatIndex) {
-          console.log('[GameTable] Already sitting in this seat');
-          toast.error('이미 해당 좌석에 앉아있습니다.');
-          return;
-        }
-        
-        // DB 업데이트 전 상태 기록
-        const previousSeatIndex = currentPlayer.seat_index;
-        console.log(`[GameTable] Moving player from seat ${previousSeatIndex} to ${seatIndex}`);
-        
-        // UI 즉시 반영 (낙관적 업데이트)
-        console.log('[GameTable] Starting optimistic UI update - Original players:', JSON.stringify(gameState.players));
-        
-        const newPlayers = [...gameState.players];
-        const playerIndex = newPlayers.findIndex(p => p.id === currentPlayer.id);
-        
-        if (playerIndex >= 0) {
-          const updatedPlayer = { 
-            ...newPlayers[playerIndex], 
-            seat_index: seatIndex 
-          };
+        if (currentPlayerInState) {
+          previousSeat = currentPlayerInState.seat_index ?? -1; // null/undefined 처리
+          console.log(`[GameTable] Found player in state. Previous seat: ${previousSeat}, New seat: ${seatIndex}`);
           
-          console.log('[GameTable] Optimistic UI update:', { 
-            playerId: updatedPlayer.id,
-            oldSeat: newPlayers[playerIndex].seat_index,
-            newSeat: updatedPlayer.seat_index,
-          });
-          
-          newPlayers[playerIndex] = updatedPlayer;
-          console.log('[GameTable] Players array after update:', JSON.stringify(newPlayers));
-          
-          // 낙관적 업데이트 - 새 게임 상태 생성
-          const newGameState = {
-            ...gameState,
-            players: newPlayers
-          };
-          
-          // 상태 업데이트 함수가 있다면 호출
-          if (typeof setGameState === 'function') {
-            console.log('[GameTable] Updating gameState with new player positions');
-            setGameState(newGameState);
-            console.log('[GameTable] GameState updated locally');
-          } else {
-            console.warn('[GameTable] setGameState is not available, skipping optimistic update');
+          // 이미 같은 자리에 있는 경우
+          if (previousSeat === seatIndex) {
+            console.log(`[GameTable] Already in the same seat: ${seatIndex}`);
+            toast.error('이미 해당 자리에 있습니다.');
+            return;
           }
         } else {
-          console.warn(`[GameTable] Player ${currentPlayer.id} not found in gameState.players array`);
+          console.warn(`[GameTable] Player ${playerIdToUse} not found in gameState.players array`);
         }
-        
-        // API 호출
-        console.log(`[GameTable] Calling onSeatChange API for seat ${seatIndex}`);
-        const apiStart = Date.now();
-        await onSeatChange(seatIndex);
-        console.log(`[GameTable] API call completed in ${Date.now() - apiStart}ms`);
-        
-        // UI 업데이트 완료 표시
-        toast.success('자리를 이동했습니다!');
-        
-        // 게임 상태 새로고침 (fetchGameState가 있는 경우에만 호출)
-        console.log('[GameTable] Refreshing game state...');
-        if (typeof fetchGameState === 'function') {
-          const fetchStart = Date.now();
-          const refreshedState = await fetchGameState();
-          console.log(`[GameTable] Game state refreshed in ${Date.now() - fetchStart}ms`);
-          console.log('[GameTable] Refreshed player data:', refreshedState?.players.map(p => ({ 
-            id: p.id, 
-            seat_index: p.seat_index 
-          })));
-        }
-      } catch (error) {
-        console.error('[GameTable] Seat change error:', error);
-        toast.error('자리 이동 중 오류가 발생했습니다.');
       }
-    } else {
-      // 신규 플레이어인 경우, 닉네임 입력 모달에 자리 번호 전달
-      setSelectedSeat(seatIndex);
-      setShowNicknameModal(true);
+      
+      // API 호출 (좌석 변경)
+      console.log(`[GameTable] Calling onSeatChange API for seat ${seatIndex}`);
+      const apiStart = Date.now();
+      
+      // API 호출 성공 후 UI 업데이트
+      await onSeatChange(seatIndex);
+      console.log(`[GameTable] API call completed in ${Date.now() - apiStart}ms`);
+      
+      // API 호출 성공 후 게임 상태를 다시 가져옵니다.
+      if (typeof fetchGameState === 'function') {
+        console.log('[GameTable] Fetching latest game state after seat change');
+        await fetchGameState(); // 게임 상태를 다시 가져옵니다.
+      } else {
+        console.warn('[GameTable] fetchGameState is not available, skipping game state refresh');
+      }
+      
+      toast.success('자리를 이동했습니다!');
+    } catch (error) {
+      console.error('[GameTable] Seat change error:', error);
+      toast.error('자리 이동 중 오류가 발생했습니다.');
     }
   };
 
   // 카드 공개 함수
-  const handleRevealCard = () => {
+  const handleRevealCard = async () => {
     if (typeof onRevealCards === 'function') {
-      onRevealCards();
+      await onRevealCards();
     } else {
       console.warn('[GameTable] onRevealCards function is not available');
     }
@@ -324,20 +301,16 @@ export function GameTable({
         return;
       }
 
-      // 플레이어의 잔액 확인 (최소 2000원 이상 필요)
       const player = gameState?.players.find(p => p.id === currentPlayerId);
       if (!player || player.balance < 2000) {
         toast.error('잔액이 부족합니다. 최소 2000원 이상 필요합니다.');
         return;
       }
       
-      // 새 게임 시작
       await startGame(gameId);
       
-      // 성공 메시지 표시
       toast.success('새 게임이 시작되었습니다.');
       
-      // 게임 상태 새로고침
       if (typeof fetchGameState === 'function') {
         await fetchGameState();
       } else {
@@ -350,9 +323,9 @@ export function GameTable({
   };
 
   // 베팅 액션 핸들러 (콜, 체크, 레이즈, 폴드 등)
-  const handleAction = (action: string, amount?: number) => {
+  const handleAction = async (action: string, amount?: number) => {
     if (typeof onAction === 'function') {
-      onAction(action, amount);
+      await onAction(action, amount);
     } else {
       console.warn(`[GameTable] onAction function is not available for ${action}`);
     }
@@ -375,52 +348,60 @@ export function GameTable({
     }
   };
 
-  // 닉네임 입력 후 참가하기
   const handleJoinWithNickname = async () => {
     if (!selectedSeat && selectedSeat !== 0) {
-      console.error('[GameTable] No seat selected for join');
+      console.error('[GameTable] No seat selected');
+      toast.error('자리를 선택해주세요.');
+      return;
+    }
+
+    if (!nickname) {
+      console.error('[GameTable] Nickname is empty');
+      toast.error('닉네임을 입력해주세요.');
       return;
     }
     
-    if (!nickname.trim()) {
-      toast.error('닉네임을 입력해주세요.');
+    try {
+      setIsJoining(true);
+      if (onAddPlayer) {
+        await onAddPlayer(selectedSeat, nickname);
+        toast.success('게임에 참가했습니다!');
+        
+        if (typeof fetchGameState === 'function') {
+          await fetchGameState();
+        }
+      } else {
+        toast.error('게임 참가 중 오류가 발생했습니다.');
+      }
+    } catch (error) {
+      console.error('[GameTable] Error joining game:', error);
+      toast.error('게임 참가 중 오류가 발생했습니다.');
+    } finally {
+      setIsJoining(false);
+    }
+    
+    setIsNicknameDialogOpen(false);
+  };
+
+  const handleNicknameSubmit = async () => {
+    if (!onAddPlayer || selectedSeat === null || !nickname.trim()) {
+      toast.error('닉네임을 입력해주세요. 좌석 선택이 너무 오래 걸렸습니다. 새로 고침 후 다시 시도해주세요.');
+      setIsNicknameDialogOpen(false);
       return;
     }
 
     try {
-      if (!currentPlayerId) {
-        // 게임 참가 함수 호출
-        const result = await handleJoinGame(selectedSeat, nickname);
-        
-        if (result?.playerId) {
-          console.log(`[GameTable] Successfully joined game with player ID: ${result.playerId}`);
-          
-          // onPlayerJoined callback (if available)
-          if (typeof onPlayerJoined === 'function') {
-            onPlayerJoined(result.playerId, nickname);
-          } else {
-            console.warn('[GameTable] onPlayerJoined is not available, skipping callback');
-          }
-          
-          // Refresh game state
-          if (typeof fetchGameState === 'function') {
-            await fetchGameState();
-          } else {
-            console.warn('[GameTable] fetchGameState is not available, skipping refresh');
-          }
-          
-          toast.success('게임에 참가했습니다!');
-        }
-      } else {
-        console.error('[GameTable] Already has a currentPlayerId, cannot join again');
-      }
+      console.log(`[GameTable] Observer submitting nickname ${nickname} for seat ${selectedSeat}`);
+      await onAddPlayer(selectedSeat, nickname);
+      
+      // 게임 상태 업데이트는 client.tsx에서 담당하므로 여기서는 최소한의 작업만 수행
+      setIsNicknameDialogOpen(false);
+      setNickname('');
     } catch (error) {
-      console.error('[GameTable] Join error:', error);
-      toast.error('게임에 참가할 수 없습니다.');
+      console.error('[GameTable] Error joining game:', error);
+      toast.error('게임 참가 중 오류가 발생했습니다.');
+      setIsNicknameDialogOpen(false);
     }
-    
-    // 닉네임 입력 모달 닫기
-    setShowNicknameModal(false);
   };
 
   return (
@@ -444,7 +425,6 @@ export function GameTable({
             {/* 테이블 이미지 */}
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="relative w-[95%] h-[95%] max-w-[700px] max-h-[700px] rounded-full overflow-hidden sm:w-[90%] sm:h-[90%] md:w-[85%] md:h-[85%]">
-                {/* 테이블 이미지 - 변경된 코드 */}
                 <div className="absolute inset-0 rounded-full border-8 border-yellow-700 bg-green-800 flex items-center justify-center shadow-2xl">
                   <div className="absolute w-[95%] h-[95%] rounded-full border-4 border-yellow-600 bg-green-700 flex items-center justify-center">
                   </div>
@@ -477,9 +457,7 @@ export function GameTable({
                 <div className="mt-4">
                   <button
                     onClick={() => {
-                      // 준비 버튼 클릭 시 기본 배팅 금액 확인
-                      const player = gameState?.players.find(p => p.id === currentPlayerId);
-                      if (!isReady && player && player.balance < (gameState?.baseBet ?? 0)) {
+                      if (!isReady && currentPlayer && currentPlayer.balance < (gameState?.baseBet ?? 0)) {
                         toast.error(`기본 배팅 금액이 부족합니다. 기본 배팅 금액: ${(gameState?.baseBet ?? 0).toLocaleString()}원`);
                         return;
                       }
@@ -491,7 +469,7 @@ export function GameTable({
                     className={`px-4 py-2 rounded font-medium ${isReady 
                       ? 'bg-red-600 hover:bg-red-700' 
                       : currentPlayer && currentPlayer.balance < (gameState?.baseBet ?? 0)
-                        ? 'bg-gray-600 cursor-not-allowed' // 기본 배팅 금액이 부족하면 버튼 비활성화
+                        ? 'bg-gray-600 cursor-not-allowed' 
                         : 'bg-green-600 hover:bg-green-700'}`}
                     title={currentPlayer && currentPlayer.balance < (gameState?.baseBet ?? 0)
                       ? `기본 배팅 금액: ${(gameState?.baseBet ?? 0).toLocaleString()}원`
@@ -522,7 +500,6 @@ export function GameTable({
                 onTimeUp={async () => {
                   console.log('배팅 시간 초과');
                   try {
-                    // 시간 초과 시 현재 플레이어가 나인지 확인
                     if (gameState.currentTurn === currentPlayerId) {
                       if (!gameId) {
                         console.error('[GameTable] Cannot place bet: gameId is undefined');
@@ -533,7 +510,6 @@ export function GameTable({
                         return;
                       }
                       
-                      // 자동으로 다이 처리
                       await import('@/lib/gameApi').then(async ({ placeBet }) => {
                         try {
                           await placeBet(gameId, currentPlayerId, 'die');
@@ -555,7 +531,7 @@ export function GameTable({
             {/* 게임 상태 메시지 (대기 중일 때) */}
             {gameState.status === 'waiting' && (
               <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-center z-30">
-                <div className="px-4 py-3 bg-black bg-opacity-70 rounded-lg border border-yellow-600 shadow-lg max-w-sm w-full">
+                <div className="px-4 py-2 bg-black bg-opacity-70 rounded-lg border border-yellow-600 shadow-lg max-w-sm w-full">
                   <h2 className="text-xl font-bold text-yellow-400 mb-2">게임 대기 중</h2>
                   <p className="text-white text-sm mb-3">
                     현재 {gameState.players.length}명의 플레이어가 참가했습니다. 게임을 시작하려면 2명 이상의 플레이어가 필요합니다.
@@ -595,14 +571,12 @@ export function GameTable({
               </div>
 
               <div className="flex space-x-4">
-                {/* 현재 플레이어 잔액 표시 */}
                 <div className="bg-gray-800 px-3 py-1 rounded text-sm flex items-center">
                   <span className="text-gray-400">잔액: </span>
                   <span className="text-yellow-300 font-bold">
                     {currentPlayer?.balance?.toLocaleString() ?? 0}원
                   </span>
                   
-                  {/* 기본 배팅 금액 표시 */}
                   {gameState.status === 'waiting' && (gameState?.baseBet ?? 0) > 0 && (
                     <div className="ml-3 flex items-center" title="기본 배팅 금액">
                       <span className="text-gray-400 text-xs mr-1">기본 배팅:</span>
@@ -626,7 +600,7 @@ export function GameTable({
             )}
             
             {/* 게임 상태 표시 */}
-            {gameState.status === 'finished' && (
+            {gameState?.status === 'finished' && (
               <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-center z-30">
                 <div className="px-6 py-4 bg-black bg-opacity-70 rounded-lg border border-yellow-600 shadow-lg">
                   <h2 className="text-2xl font-bold text-yellow-400 mb-2">게임 종료</h2>
@@ -638,7 +612,7 @@ export function GameTable({
             )}
             
             {/* 닉네임 입력 모달 */}
-            {showNicknameModal && (
+            {isNicknameDialogOpen && (
               <div className="fixed top-0 left-0 w-full h-full bg-black bg-opacity-70 flex items-center justify-center z-50">
                 <div className="bg-gray-900 p-6 rounded-lg border-2 border-yellow-500 text-white shadow-lg max-w-md w-full">
                   <h2 className="text-xl font-bold text-yellow-400 mb-4">닉네임 입력</h2>
@@ -658,13 +632,13 @@ export function GameTable({
                   
                   <div className="flex justify-end space-x-3">
                     <button 
-                      onClick={() => setShowNicknameModal(false)} 
+                      onClick={() => setIsNicknameDialogOpen(false)} 
                       className="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-white font-medium"
                     >
                       취소
                     </button>
                     <button 
-                      onClick={handleJoinWithNickname} 
+                      onClick={handleNicknameSubmit} 
                       disabled={isJoining || !nickname.trim()}
                       className={`px-4 py-2 rounded font-medium ${
                         isJoining || !nickname.trim()
@@ -693,19 +667,17 @@ export function GameTable({
   );
 }
 
-// 빈 자리 위치 스타일 계산 함수
 function getEmptySlotStyles(position: number): string {
-  // ube48 uc790ub9ac ud074ub9ad ud578ub4e4ub7ec
   switch (position % 5) {
-    case 0: // ud558ub2e8 uc911uc559
+    case 0: 
       return 'bottom-[8%] left-1/2 -translate-x-1/2';
-    case 1: // uc624ub978ucabd ud558ub2e8
+    case 1: 
       return 'bottom-[25%] right-[15%]';
-    case 2: // uc624ub978ucabd uc0c1ub2e8
+    case 2: 
       return 'top-[25%] right-[15%]';
-    case 3: // uc0c1ub2e8 uc911uc559
+    case 3: 
       return 'top-[8%] left-1/2 -translate-x-1/2';
-    case 4: // uc67cucabd uc0c1ub2e8
+    case 4: 
       return 'top-[25%] left-[15%]';
     default:
       return 'bottom-[8%] left-1/2 -translate-x-1/2';

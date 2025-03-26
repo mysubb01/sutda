@@ -441,19 +441,22 @@ export async function checkRoomAccess(roomId: string, playerId: string): Promise
 
 /**
  * 플레이어 좌석 변경
+ * @deprecated gameApi.ts의 updateSeat 함수를 대신 사용할 것
  */
 export async function changeSeat(roomId: string, playerId: string, newSeatIndex: number): Promise<void> {
+  console.log(`[DEPRECATED] changeSeat in roomApi.ts is called. Use updateSeat from gameApi.ts instead`);
+  
+  // gameApi의 updateSeat 함수를 직접 import하여 사용합니다.
+  const { updateSeat } = await import('./gameApi');
+  
   try {
-    console.log(`[changeSeat] Changing seat in room ${roomId} - Player: ${playerId}, New seat: ${newSeatIndex}`);
-    
-    // updateSeat 함수 사용 (통합 함수) - roomId 전달
-    const { updateSeat } = require('./gameApi');
-    await updateSeat(null, playerId, newSeatIndex, roomId);
-    
-    console.log(`[changeSeat] Seat change successful`);
-  } catch (err) {
-    console.error('[changeSeat] 좌석 변경 중 예외 발생:', err);
-    throw err;
+    const result = await updateSeat(null, playerId, newSeatIndex, roomId);
+    if (!result) {
+      throw new Error('좌석 변경에 실패했습니다.');
+    }
+  } catch (error) {
+    console.error('좌석 변경 중 오류 발생:', error);
+    throw error;
   }
 }
 

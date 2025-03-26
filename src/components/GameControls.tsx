@@ -516,12 +516,13 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
                 variant="success"
               />
               
-              <BettingButton
-                label="다이"
-                onClick={handleDie}
-                disabled={isLoading}
-                variant="danger"
-              />
+              <button
+                className={`bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded shadow ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                onClick={() => handleDie()}
+                disabled={isLoading || currentPlayer?.is_die}
+              >
+                다이
+              </button>
             </div>
           </div>
         ) : (
@@ -532,12 +533,13 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
             
             <div className="flex justify-end">
               <div className="w-1/2">
-                <BettingButton
-                  label="다이 (포기)"
-                  onClick={handleDie}
-                  disabled={isLoading || currentPlayer?.isDie}
-                  variant="danger"
-                />
+                <button
+                  className={`bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded shadow ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  onClick={() => handleDie()}
+                  disabled={isLoading || currentPlayer?.is_die}
+                >
+                  다이 (포기)
+                </button>
               </div>
             </div>
           </div>

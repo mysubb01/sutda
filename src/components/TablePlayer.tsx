@@ -16,7 +16,7 @@ interface TablePlayerProps {
     position: number;
     isMe: boolean;
     isCurrentTurn: boolean;
-    isDead: boolean;
+    is_die: boolean;
     cards: { status: CardStatus; value?: string }[];
     selected_cards?: number[];
     open_card?: number;
@@ -28,7 +28,7 @@ interface TablePlayerProps {
 }
 
 export function TablePlayer({ player, isReady, mode = 2, bettingRound = 1 }: TablePlayerProps) {
-  const { username, balance, position, isMe, isCurrentTurn, cards, isDead, selected_cards, open_card } = player;
+  const { username, balance, position, isMe, isCurrentTurn, cards, is_die, selected_cards, open_card } = player;
   const [cardValues, setCardValues] = useState<number[]>([]);
   const [combination, setCombination] = useState<{ rank: string; value: number } | null>(null);
 
@@ -43,7 +43,7 @@ export function TablePlayer({ player, isReady, mode = 2, bettingRound = 1 }: Tab
 
       setCardValues(values);
 
-      if (values.length >= 2 && (isMe || isDead)) {
+      if (values.length >= 2 && (isMe || is_die)) {
         try {
           const cardsToEvaluate = mode === 3 && selected_cards
             ? selected_cards.slice(0, 2)
@@ -57,7 +57,7 @@ export function TablePlayer({ player, isReady, mode = 2, bettingRound = 1 }: Tab
         }
       }
     }
-  }, [cards, isMe, isDead, mode, selected_cards]);
+  }, [cards, isMe, is_die, mode, selected_cards]);
 
   const posStyle = getPositionStyles(position);
 
@@ -98,7 +98,7 @@ export function TablePlayer({ player, isReady, mode = 2, bettingRound = 1 }: Tab
             src={`/images/ui/Mface${(position % 4) + 1}.png`}
             alt="Player"
             fill
-            className={`object-cover ${isDead ? 'grayscale opacity-50' : ''}`}
+            className={`object-cover ${is_die ? 'grayscale opacity-50' : ''}`}
           />
         </div>
 
@@ -148,7 +148,7 @@ export function TablePlayer({ player, isReady, mode = 2, bettingRound = 1 }: Tab
           )}
         </div>
 
-        {isDead && (
+        {is_die && (
           <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-40 rounded-md">
             <div className="bg-red-900 px-3 py-1 rounded-md text-white font-bold">
               DIE

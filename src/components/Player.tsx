@@ -8,7 +8,7 @@ interface Player {
   username: string;
   cards?: number[];
   balance: number;
-  isDie?: boolean;
+  is_die?: boolean;
 }
 
 interface PlayerProps {
@@ -19,14 +19,14 @@ interface PlayerProps {
 }
 
 export function Player({ player, isCurrentPlayer, isCurrentTurn, showCards }: PlayerProps) {
-  const { username, cards, isDie, balance } = player;
+  const { username, cards, is_die, balance } = player;
   
   // 플레이어 상태에 따른 UI 클래스
   const playerBoxClasses = `
     rounded-lg p-4 relative
     ${isCurrentPlayer ? 'bg-blue-800 bg-opacity-70' : 'bg-gray-700 bg-opacity-70'} 
     ${isCurrentTurn ? 'ring-2 ring-yellow-400' : ''}
-    ${isDie ? 'opacity-60' : ''}
+    ${is_die ? 'opacity-60' : ''}
     border border-gray-600
     transition-all duration-300
   `;
@@ -48,7 +48,7 @@ export function Player({ player, isCurrentPlayer, isCurrentTurn, showCards }: Pl
   }
   
   // 다이 상태
-  if (isDie) {
+  if (is_die) {
     return (
       <div className={playerBoxClasses}>
         <div className="flex flex-col items-center">

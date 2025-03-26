@@ -254,8 +254,8 @@ export function compareCards(player1Cards: number[], player2Cards: number[]): nu
 }
 
 // 다음 차례 계산
-export function nextTurn(currentPlayerId: string, players: { id: string; isDie: boolean }[]): string {
-  const activePlayers = players.filter(p => !p.isDie);
+export function nextTurn(currentPlayerId: string, players: { id: string; is_die: boolean }[]): string {
+  const activePlayers = players.filter(p => !p.is_die);
   if (activePlayers.length <= 1) {
     return activePlayers[0]?.id || currentPlayerId;
   }
@@ -266,8 +266,8 @@ export function nextTurn(currentPlayerId: string, players: { id: string; isDie: 
 }
 
 // 승자 결정 함수 개선
-export function determineWinner(players: { id: string; cards: number[]; isDie: boolean }[]): { winnerId: string | null; isRegame: boolean } {
-  const activePlayers = players.filter(p => !p.isDie);
+export function determineWinner(players: { id: string; cards: number[]; is_die: boolean }[]): { winnerId: string | null; isRegame: boolean } {
+  const activePlayers = players.filter(p => !p.is_die);
   
   if (activePlayers.length === 0) {
     return { winnerId: null, isRegame: false };

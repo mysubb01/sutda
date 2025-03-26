@@ -9,8 +9,8 @@ declare global {
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { GameState, Message } from '@/types/game';
-import { getGameState, joinGame, updateSeat, isRoomOwner, canStartGame, startGame, toggleReady, handleBettingTimeout } from '@/lib/gameApi';
+import { GameState, Player, Message } from '@/types/game';
+import { getGameState, joinGame, updateSeat, isRoomOwner, canStartGame, startGame, toggleReady, handleBettingTimeout, isSeatOccupied } from '@/lib/gameApi';
 import { GameTable } from '@/components/GameTable';
 import { GameControls } from '@/components/GameControls';
 import { Chat } from '@/components/Chat';
@@ -115,130 +115,150 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
       return data;
     } catch (err: any) {
       console.error('[fetchGameState] uc624ub958 ubc1cuc0dd:', err);
-      const errorMsg = err?.message || 'uac8cuc784 uc815ubcf4ub97c ubd88ub7ecuc624ub294 uc911 uc624ub958uac00 ubc1cuc0ddud588uc2b5ub2c8ub2e4.';
+      const errorMsg = err?.message || 'uac8cuc784 uc0c1ud0dc uac00uc838uc624uae30 uc911 uc624ub958uac00 ubc1cuc0ddud588uc2b5ub2c8ub2e4.';
       setError(errorMsg);
       toast.error(`uac8cuc784 ub85cub4dc uc624ub958: ${errorMsg}`);
       return null;
     }
   };
   
+  // 새로운 플레이어 추가 처리 함수
+  const handleAddPlayer = async (seatIndex: number, nickname: string): Promise<void> => {
+    console.log(`[handleAddPlayer] Observer joining game at seat ${seatIndex} with nickname ${nickname}`);
+    try {
+      // 닉네임 검증
+      if (!nickname.trim()) {
+        toast.error('닉네임을 입력해주세요.');
+        return;
+      }
+
+      // 게임 참가 API 호출 (player_id 생성)
+      const { playerId: newPlayerId, gameState: newGameState } = await joinGame(gameId, nickname, seatIndex);
+      
+      // 생성된 player_id 확인 및 저장
+      if (!newPlayerId) {
+        console.error('[handleAddPlayer] Failed to get valid player_id from joinGame');
+        toast.error('플레이어 ID 생성에 실패했습니다.');
+        return;
+      }
+      
+      console.log(`[handleAddPlayer] Successfully joined game. New player_id: ${newPlayerId}`);
+      
+      // 로컬 스토리지에 플레이어 정보 저장
+      localStorage.setItem(`game_${gameId}_player_id`, newPlayerId);
+      localStorage.setItem(`game_${gameId}_username`, nickname);
+      localStorage.setItem(`game_${gameId}_seat_index`, String(seatIndex));
+      
+      // 상태 업데이트
+      setPlayerId(newPlayerId);
+      setUsername(nickname);
+      setIsObserver(false); // 관찰자 모드에서 플레이어 모드로 전환
+      
+      // 게임 상태와 메시지 새로고침
+      await fetchGameState();
+      await fetchMessages();
+      
+      // 참가 성공 메시지
+      toast.success(`${nickname}님이 게임에 참가했습니다!`);
+      // 값을 반환하지 않음 (Promise<void>)
+    } catch (err: any) {
+      console.error('[handleAddPlayer] Error adding player:', err);
+      toast.error(`게임 참가 오류: ${err?.message || '알 수 없는 오류가 발생했습니다.'}`);
+    }
+  };
+  
   // 자리 변경 처리 함수
   const handleSeatChange = async (seatIndex: number) => {
-    if (!playerId) {
-      console.error('[handleSeatChange] No playerId available');
+    console.log(`[handleSeatChange] Starting seat change process - ${isObserver ? 'Observer' : 'Player'} mode, Seat: ${seatIndex}`);
+    
+    if (!gameId) {
+      console.error('[handleSeatChange] Cannot change seat: gameId is undefined');
+      toast.error('uac8cuc784 IDuac00 uc815uc758ub418uc9c0 uc54auc558uc2b5ub2c8ub2e4.');
       return;
     }
     
+    if (isSeatChanging) {
+      console.log('[handleSeatChange] Seat change already in progress, ignoring request');
+      toast.error('uc88cuc11d ubcc0uacbduc774 uc774ubbf8 uc9c4ud589 uc911uc785ub2c8ub2e4.');
+      return;
+    }
+    
+    // uc88cuc11d ubcc0uacbd uc911 ud45cuc2dc (uc911ubcf5 uc694uccad ubc29uc9c0)
+    setIsSeatChanging(true);
+    window._isSeatChanging = true;
+    
     try {
-      console.log(`[handleSeatChange] Starting seat change operation - Player ${playerId}, Seat ${seatIndex}, GameId ${gameId}`);
-      console.log('[handleSeatChange] Current players state:', gameState?.players.map(p => ({ 
-        id: p.id, 
-        seat_index: p.seat_index,
-        username: p.username
-      })));
+      console.log(`[handleSeatChange] Checking conditions - isObserver: ${isObserver}, playerId: ${playerId}`);
+      console.log(`[handleSeatChange] Host status: ${isHost ? 'IS HOST' : 'NOT HOST'}`);
       
-      // uc911ubcf5 uc88cuc11d ubcc0uacbd ubc29uc9c0
-      if (isSeatChanging || window._isSeatChanging) {
-        console.log('[handleSeatChange] Seat change already in progress');
-        toast.error('uc88cuc11d ubcc0uacbd uc774ubbf8 uc9c4ud589 uc911uc785ub2c8ub2e4. uc7a0uc2dcub9cc uae30ub2e4ub824uc8fcuc138uc694.');
-        return;
-      }
-      
-      setIsSeatChanging(true);
-      window._isSeatChanging = true; // Set global state flag
-      console.log('[handleSeatChange] Set seat changing flags');
-      
-      // uac8cuc784 uc0c1ud0dcuac00 ub300uae30 uc0c1ud0dcuac00 uc544ub2cc uacbduc6b0 ucc98ub9ac
-      if (gameState && gameState.status !== 'waiting') {
-        console.log(`[handleSeatChange] Game not in waiting state: ${gameState.status}`);
-        toast.error('uac8cuc784uc774 uc9c4ud589 uc911uc77c ub54cub294 uc88cuc11duc744 uc774ub3d9ud560 uc218 uc5c6uc2b5ub2c8ub2e4.');
+      // gameState ud655uc778
+      if (!gameState) {
+        console.error('[handleSeatChange] Game state is null or undefined');
+        toast.error('uac8cuc784 uc0c1ud0dcub97c ubd88ub7ecuc62c uc218 uc5c6uc2b5ub2c8ub2e4. uc0c8ub85cuace0uce68 ud6c4 ub2e4uc2dc uc2dcub3c4ud574uc8fcuc138uc694.');
         setIsSeatChanging(false);
         window._isSeatChanging = false;
         return;
       }
       
-      // uac19uc740 uc790ub9acuc778uc9c0 ud655uc778
-      if (gameState && gameState.players) {
-        const currentPlayer = gameState.players.find(p => p.id === playerId);
-        console.log('[handleSeatChange] Current player data:', currentPlayer);
-        
-        if (currentPlayer && currentPlayer.seat_index === seatIndex) {
-          console.log(`[handleSeatChange] Already in the same seat: ${seatIndex}`);
-          toast.error('uc774ubbf8 ud574ub2f9 uc88cuc11duc5d0 uc788uc2b5ub2c8ub2e4.');
-          setIsSeatChanging(false);
-          window._isSeatChanging = false;
-          return;
-        }
-      }
-      
-      // ub2e4ub978 ud50cub808uc774uc5b4uac00 uc120ud0ddud55c uc88cuc11duc5d0 uc788ub294uc9c0 uc870uc0ac
-      const occupiedSeats = gameState?.players.filter(p => 
-        p.id !== playerId && p.seat_index === seatIndex
-      );
-      
-      if (occupiedSeats && occupiedSeats.length > 0) {
-        console.log(`[handleSeatChange] Seat ${seatIndex} is already taken by:`, occupiedSeats);
-        toast.error('uc774ubbf8 ub2e4ub978 ud50cub808uc774uc5b4uac00 uc120ud0ddud55c uc88cuc11duc5d0 uc788uc2b5ub2c8ub2e4.');
+      // uac8cuc784 uc0c1ud0dc ud655uc778 (ub300uae30 uc911uc774 uc544ub2c8uba74 uc790ub9ac ubcc0uacbd ubd88uac00)
+      if (gameState.status !== 'waiting') {
+        console.log(`[handleSeatChange] Current game status: ${gameState.status}`);
+        toast.error('uac8cuc784uc774 uc9c4ud589 uc911uc77c ub54cub294 uc790ub9acub97c ubcc0uacbdud560 uc218 uc5c6uc2b5ub2c8ub2e4.');
         setIsSeatChanging(false);
         window._isSeatChanging = false;
         return;
       }
       
-      // API ud638ucd9c
-      console.log(`[handleSeatChange] Calling updateSeat API - Game ${gameId}, Player ${playerId}, Seat ${seatIndex}`);
-      const apiStart = Date.now();
-      let updateSuccess = false;
-      try {
-        updateSuccess = await updateSeat(gameId, playerId, seatIndex);
-        console.log(`[handleSeatChange] updateSeat API completed in ${Date.now() - apiStart}ms with result:`, updateSuccess);
-      } catch (apiError) {
-        console.error('[handleSeatChange] updateSeat API error:', apiError);
-        toast.error('uc88cuc11d ubcc0uacbd uc624ub958: API ud638ucd9cuc911 uc624ub958 ubc1cuc0dd');
+      // ub300uc0c1 uc88cuc11duc774 uc774ubbf8 uc810uc720ub418uc5b4 uc788ub294uc9c0 DBuc5d0uc11c uc9c1uc811 ud655uc778
+      const isOccupied = await isSeatOccupied(seatIndex, playerId || '', gameId);
+      if (isOccupied) {
+        console.log(`[handleSeatChange] Seat ${seatIndex} is already occupied by another player`);
+        toast.error('uc774ubbf8 ub2e4ub978 ud50cub808uc774uc5b4uac00 uc120ud0ddud55c uc88cuc11duc785ub2c8ub2e4.');
         setIsSeatChanging(false);
         window._isSeatChanging = false;
         return;
       }
+      
+      console.log(`[handleSeatChange] All checks passed, proceeding with seat change to ${seatIndex}`);
+      
+      // uad00uc0bcuc790uc77c uacbduc6b0uc5d0ub294 ub2c9ub124uc784 uc785ub825 uc694uccad
+      if (isObserver) {
+        console.log('[handleAddPlayer] Observer mode detected, redirecting to nickname dialog');
+        setIsSeatChanging(false);
+        window._isSeatChanging = false;
+        return;
+      }
+      
+      // ud50cub808uc774uc5b4uc758 uc88cuc11d ubcc0uacbd ucc98ub9ac
+      if (!playerId) {
+        console.error('[handleSeatChange] PlayerId is required for seat change');
+        toast.error('ud50cub808uc774uc5b4 IDuac00 uc5c6uc2b5ub2c8ub2e4.');
+        setIsSeatChanging(false);
+        window._isSeatChanging = false;
+        return;
+      }
+      
+      console.log(`[handleSeatChange] Player changing seat: ${playerId}, to seat: ${seatIndex}`);
+      const updateSuccess = await updateSeat(gameId, playerId, seatIndex);
       
       if (!updateSuccess) {
-        console.error('[handleSeatChange] API call returned false');
-        toast.error('uc88cuc11d ubcc0uacbd uc624ub958: API ud638ucd9cuc774 uc2e4ud328ud588uc2b5ub2c8ub2e4.');
+        console.error('[handleSeatChange] Seat update failed');
+        toast.error('uc88cuc11d ubcc0uacbduc5d0 uc2e4ud328ud588uc2b5ub2c8ub2e4.');
         setIsSeatChanging(false);
         window._isSeatChanging = false;
         return;
       }
       
-      // uc131uacf5 uba54uc138uc9c0
-      toast.success('uc88cuc11duc774 ubcc0uacbdub418uc5c8uc2b5ub2c8ub2e4.');
+      console.log('[handleSeatChange] Seat update successful');
+      toast.success('uc88cuc11duc744 ubcc0uacbdud588uc2b5ub2c8ub2e4!');
       
-      console.log('[handleSeatChange] Seat change operation completed successfully');
-      
-      // uac8cuc784 uc0c1ud0dc uc0c8ub85cuace0uce68
-      console.log('[handleSeatChange] Refreshing game state...');
-      const fetchStart = Date.now();
-      const refreshedState = await fetchGameState();
-      console.log(`[handleSeatChange] Game state refreshed in ${Date.now() - fetchStart}ms`);
-      
-      // uac00uc838uc628 uac8cuc784 uc0c1ud0dcuc5d0uc11c ud604uc7ac ud50cub808uc774uc5b4uc758 uc88cuc11d uc815ubcf4 ud655uc778
-      if (refreshedState) {
-        const updatedPlayer = refreshedState.players.find(p => p.id === playerId);
-        console.log(`[handleSeatChange] Player seat after refresh: ${updatedPlayer?.seat_index}, expected: ${seatIndex}`);
-        
-        if (updatedPlayer && updatedPlayer.seat_index !== seatIndex) {
-          console.warn(`[handleSeatChange] Seat mismatch! DB seat: ${updatedPlayer.seat_index}, UI seat: ${seatIndex}`);
-        }
-      }
-      
-      // uc88cuc11d ubcc0uacbd uc0c1ud0dc ud574uc81c
-      setTimeout(() => {
-        setIsSeatChanging(false);
-        window._isSeatChanging = false; // Release global state flag
-        console.log('[handleSeatChange] Released seat changing flags');
-      }, 500); // uc57duac04 uc9c0uc5f0 uc2dcuac04 uc99duc58c
-    } catch (err) {
-      console.error('[handleSeatChange] Unexpected error:', err);
-      toast.error('uc88cuc11duc744 ubcc0uacbdud560 uc218 uc5c6uc2b5ub2c8ub2e4. ub2e4uc2dc uc2dcub3c4ud574uc8fcuc138uc694.');
-      
-      // uc624ub958 ubc1cuc0dd uc2dc uc88cuc11d ubcc0uacbd uc0c1ud0dc ud574uc81c
+      // ucd5cuc2e0 uac8cuc784 uc0c1ud0dc uac00uc838uc624uae30
+      await fetchGameState();
+    } catch (error) {
+      console.error('[handleSeatChange] Error:', error);
+      toast.error('uc88cuc11d ubcc0uacbd uc911 uc624ub958uac00 ubc1cuc0ddud588uc2b5ub2c8ub2e4.');
+    } finally {
+      // uc88cuc11d ubcc0uacbd uc0c1ud0dc ucd08uae30ud654
       setIsSeatChanging(false);
       window._isSeatChanging = false;
     }
@@ -648,6 +668,7 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
               setGameState={setGameState}
               isHost={isHost}
               isObserver={isObserver}
+              onAddPlayer={handleAddPlayer}
             />
             
             {/* 게임 컨트롤 (오른쪽 아래에 위치) */}
