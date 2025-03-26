@@ -297,22 +297,45 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
     if (!playerId || !isHost) return;
     
     try {
-      // 시작 가능 여부 다시 확인
+      setIsStartingGame(true);
+      
+      // 최신 게임 상태 가져오기
+      await fetchGameState();
+      
+      // 시작 가능 여부 확인
       const startStatus = await canStartGame(gameId);
+      console.log('게임 시작 가능 여부:', startStatus);
+      
       if (!startStatus.canStart) {
         toast.error(startStatus.message);
         return;
       }
       
-      setIsStartingGame(true);
+      // 현재 준비된 플레이어 수 확인
+      const { data: readyPlayers } = await supabase
+        .from('players')
+        .select('id')
+        .eq('game_id', gameId)
+        .eq('is_ready', true)
+        .is('is_die', false);
+      
+      console.log('준비된 플레이어 수:', readyPlayers?.length);
+      
+      if (!readyPlayers || readyPlayers.length < 2) {
+        toast.error('게임 시작을 위해 최소 2명의 준비된 플레이어가 필요합니다.');
+        return;
+      }
+      
+      // 게임 시작 요청
       await startGame(gameId);
       toast.success('게임이 시작됩니다!');
       
-      // 게임 상태 갱신
-      await fetchGameState();
-    } catch (err) {
+      // 게임 상태를 즉시 갱신하지 않고 실시간 구독에 의존
+      // 실시간 업데이트가 자동으로 상태를 갱신할 것임
+    } catch (err: any) {
       console.error('게임 시작 오류:', err);
-      toast.error('게임을 시작하는 중 오류가 발생했습니다.');
+      const errorMessage = err?.message || '게임을 시작하는 중 오류가 발생했습니다.';
+      toast.error(errorMessage);
     } finally {
       setIsStartingGame(false);
     }
