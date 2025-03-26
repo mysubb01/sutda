@@ -55,9 +55,11 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
         setMessages(data);
       } else {
         console.error('메시지 불러오기 오류:', error);
+        toast.error(`메시지 불러오기 오류: ${error.message || '알 수 없는 오류'}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('메시지 불러오기 예외:', err);
+      toast.error(`메시지 불러오기 오류: ${err?.message || '알 수 없는 오류'}`);
     }
   };
   
@@ -88,9 +90,11 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
       }
       
       return data;
-    } catch (err) {
+    } catch (err: any) {
       console.error('게임 상태 불러오기 실패:', err);
-      setError('게임 정보를 불러오는 중 오류가 발생했습니다.');
+      const errorMsg = err?.message || '게임 정보를 불러오는 중 오류가 발생했습니다.';
+      setError(errorMsg);
+      toast.error(`게임 로드 오류: ${errorMsg}`);
       return null;
     }
   };
@@ -250,9 +254,11 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
       fetchMessages();
       
       // 이제 setupSubscriptions는 호출하지 않음 (폴링 방식 사용)
-    } catch (err) {
+    } catch (err: any) {
       console.error('게임 참가 오류:', err);
-      setError('게임 참가 중 오류가 발생했습니다.');
+      const errorMsg = err?.message || '게임 참가 중 오류가 발생했습니다.';
+      setError(errorMsg);
+      toast.error(`게임 참가 오류: ${errorMsg}`);
     } finally {
       setIsJoining(false);
     }
@@ -297,22 +303,45 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
     if (!playerId || !isHost) return;
     
     try {
-      // 시작 가능 여부 다시 확인
+      setIsStartingGame(true);
+      
+      // 최신 게임 상태 가져오기
+      await fetchGameState();
+      
+      // 시작 가능 여부 확인
       const startStatus = await canStartGame(gameId);
+      console.log('게임 시작 가능 여부:', startStatus);
+      
       if (!startStatus.canStart) {
         toast.error(startStatus.message);
         return;
       }
       
-      setIsStartingGame(true);
+      // 현재 준비된 플레이어 수 확인
+      const { data: readyPlayers } = await supabase
+        .from('players')
+        .select('id')
+        .eq('game_id', gameId)
+        .eq('is_ready', true)
+        .is('is_die', false);
+      
+      console.log('준비된 플레이어 수:', readyPlayers?.length);
+      
+      if (!readyPlayers || readyPlayers.length < 2) {
+        toast.error('게임 시작을 위해 최소 2명의 준비된 플레이어가 필요합니다.');
+        return;
+      }
+      
+      // 게임 시작 요청
       await startGame(gameId);
       toast.success('게임이 시작됩니다!');
       
-      // 게임 상태 갱신
-      await fetchGameState();
-    } catch (err) {
+      // 게임 상태를 즉시 갱신하지 않고 실시간 구독에 의존
+      // 실시간 업데이트가 자동으로 상태를 갱신할 것임
+    } catch (err: any) {
       console.error('게임 시작 오류:', err);
-      toast.error('게임을 시작하는 중 오류가 발생했습니다.');
+      const errorMessage = err?.message || '게임을 시작하는 중 오류가 발생했습니다.';
+      toast.error(errorMessage);
     } finally {
       setIsStartingGame(false);
     }

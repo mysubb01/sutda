@@ -327,9 +327,33 @@ export function GameTable({
               <BettingTimer 
                 timeLimit={30} 
                 visible={gameState.status === 'playing'}
-                onTimeUp={() => {
+                onTimeUp={async () => {
                   console.log('배팅 시간 초과');
-                  // 시간 초과 시 자동 다이 처리 로직 (필요하다면 구현)
+                  try {
+                    // 시간 초과 시 현재 플레이어가 나인지 확인
+                    if (gameState.currentTurn === currentPlayerId) {
+                      // 자동으로 다이 처리
+                      await import('@/lib/gameApi').then(async ({ placeBet }) => {
+                        try {
+                          await placeBet(gameId, currentPlayerId, 'die');
+                          console.log('시간 초과로 인한 자동 다이 처리 완료');
+                          toast.success('시간 초과로 자동 다이 처리되었습니다.');
+                        } catch (betError: any) {
+                          console.error('다이 처리 오류:', betError);
+                          toast.error(`다이 처리 오류: ${betError?.message || '알 수 없는 오류가 발생했습니다.'}`);
+                        } finally {
+                          // 게임 상태 새로고침
+                          fetchGameState();
+                        }
+                      });
+                    } else {
+                      // 다른 플레이어의 턴이 만료되었을 때는 게임 상태만 새로고침
+                      fetchGameState();
+                    }
+                  } catch (error: any) {
+                    console.error('시간 초과 처리 오류:', error);
+                    toast.error(`시간 초과 처리 오류: ${error?.message || '알 수 없는 오류가 발생했습니다.'}`);
+                  }
                 }}
               />
             )}
