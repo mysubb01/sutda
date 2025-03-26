@@ -101,28 +101,68 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
   
   // 자리 변경 처리 함수
   const handleSeatChange = async (seatIndex: number) => {
+    if (!playerId) return;
+    
     try {
-      setIsSeatChanging(true);
+      console.log(`[Client] Seat change started - Player ${playerId}, Seat ${seatIndex}`);
       
-      // 좌석 변경 API 호출
-      await updateSeat(gameId, playerId!, seatIndex);
+      // 중복 좌석 변경 방지
+      if (isSeatChanging || window._isSeatChanging) {
+        console.log('[Client] Seat change already in progress');
+        toast.error('좌석 변경이 이미 진행 중입니다. 잠시만 기다려주세요.');
+        return;
+      }
+      
+      setIsSeatChanging(true);
+      window._isSeatChanging = true; // Set global state flag
+      
+      // 게임 상태가 대기 상태가 아닌 경우 처리
+      if (gameState && gameState.status !== 'waiting') {
+        toast.error('게임이 진행 중일 때는 좌석을 이동할 수 없습니다.');
+        setIsSeatChanging(false);
+        window._isSeatChanging = false;
+        return;
+      }
+      
+      // 같은 자리인지 확인
+      if (gameState && gameState.players) {
+        const currentPlayer = gameState.players.find(p => p.id === playerId);
+        if (currentPlayer && currentPlayer.seat_index === seatIndex) {
+          toast.error('이미 해당 좌석에 있습니다.');
+          setIsSeatChanging(false);
+          window._isSeatChanging = false;
+          return;
+        }
+      }
+      
+      // API 호출
+      console.log(`[Client] Calling updateSeat API - Game ${gameId}, Player ${playerId}, Seat ${seatIndex}`);
+      await updateSeat(gameId, playerId, seatIndex);
       
       // 성공 메시지
       toast.success('좌석이 변경되었습니다.');
       
-      // 로컬 스토리지에도 좌석 정보 저장 (복구 용도)
-      localStorage.setItem(`game_${gameId}_seat_index`, String(seatIndex));
+      console.log('[Client] Seat change completed:', seatIndex);
       
-      console.log('좌석 변경 완료:', seatIndex);
+      // 게임 상태 새로고침
+      await fetchGameState();
+      console.log('[Client] Game state refreshed');
       
-      // 좌석 변경 상태 해제 - 실시간 업데이트가 자동으로 처리함
+      // 좌석 변경 상태 해제
       setTimeout(() => {
         setIsSeatChanging(false);
-      }, 500);
+        window._isSeatChanging = false; // Release global state flag
+      }, 500); // 약간 지연 시간 증가
     } catch (err) {
-      console.error('좌석 변경 오류:', err);
-      toast.error('좌석을 변경할 수 없습니다.');
+      console.error('[Client] Seat change error:', err);
+      toast.error('좌석을 변경할 수 없습니다. 다시 시도해주세요.');
+      
+      // 좌석 변경 상태 해제
       setIsSeatChanging(false);
+      window._isSeatChanging = false;
+      
+      // 오류 시에도 게임 상태 새로고침
+      fetchGameState();
     }
   };
   

@@ -444,49 +444,11 @@ export async function checkRoomAccess(roomId: string, playerId: string): Promise
  */
 export async function changeSeat(roomId: string, playerId: string, newSeatIndex: number): Promise<void> {
   try {
-    // 플레이어 정보 조회
-    const { data: playerData, error: playerError } = await supabase
-      .from('players')
-      .select('*')
-      .eq('id', playerId)
-      .eq('room_id', roomId)
-      .single();
-
-    if (playerError || !playerData) {
-      console.error('플레이어 조회 오류:', playerError);
-      throw new Error('플레이어 정보를 찾을 수 없습니다.');
-    }
-
-    // 요청한 자리가 이미 차지되어 있는지 확인
-    const { data: existingSeat, error: seatError } = await supabase
-      .from('players')
-      .select('id')
-      .eq('room_id', roomId)
-      .eq('seat_index', newSeatIndex);
-
-    if (seatError) {
-      console.error('좌석 확인 오류:', seatError);
-      throw new Error('좌석 정보를 확인할 수 없습니다.');
-    }
-
-    if (existingSeat && existingSeat.length > 0) {
-      throw new Error('이미 다른 플레이어가 해당 자리에 앉아있습니다.');
-    }
-
-    // 자리 변경
-    const { error: updateError } = await supabase
-      .from('players')
-      .update({ seat_index: newSeatIndex })
-      .eq('id', playerId)
-      .eq('room_id', roomId);
-
-    if (updateError) {
-      console.error('자리 변경 오류:', updateError);
-      throw new Error('자리를 변경할 수 없습니다: ' + updateError.message);
-    }
-
+    // updateSeat ud568uc218 uc0acuc6a9 (ud1b5ud569 ud568uc218)
+    const { updateSeat } = require('./gameApi');
+    await updateSeat(null, playerId, newSeatIndex);
   } catch (err) {
-    console.error('좌석 변경 중 예외 발생:', err);
+    console.error('uc88cuc11d ubcc0uacbd uc911 uc608uc678 ubc1cuc0dd:', err);
     throw err;
   }
 }

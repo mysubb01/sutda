@@ -26,7 +26,8 @@ const ErrorType = {
   TIMEOUT_ERROR: 'timeout_error',
   UNKNOWN_ERROR: 'unknown_error',
   GAME_ACTION_ERROR: 'game_action_error',
-  GAME_DATA_ERROR: 'game_data_error'
+  GAME_DATA_ERROR: 'game_data_error',
+  GAME_FULL: 'game_full'
 };
 
 /**
@@ -68,6 +69,9 @@ function handleGameError(error: any, errorType: string = ErrorType.UNKNOWN_ERROR
       break;
     case ErrorType.TIMEOUT_ERROR:
       userMessage = '요청 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.';
+      break;
+    case ErrorType.GAME_FULL:
+      userMessage = '게임에 더 이상 참가할 수 없습니다.';
       break;
   }
   
@@ -189,6 +193,7 @@ export async function joinGame(
     // 로컬 스토리지에서 사용자 ID와 플레이어 ID 확인
     const storedUserId = localStorage.getItem(`game_${gameId}_user_id`);
     const storedPlayerId = localStorage.getItem(`game_${gameId}_player_id`);
+    const storedSeatIndex = localStorage.getItem(`game_${gameId}_seat_index`);
     
     // 기존 참여자인지 확인
     if (storedUserId && storedPlayerId) {
@@ -201,7 +206,7 @@ export async function joinGame(
         .single();
       
       if (!existingPlayerError && existingPlayer) {
-        console.log('기존 플레이어로 재접속:', existingPlayer.id);
+        console.log('기존 플레이어로 재접속:', existingPlayer.id, '좌석:', existingPlayer.seat_index);
         
         // 이름 업데이트가 필요한 경우
         if (existingPlayer.username !== username) {
@@ -231,6 +236,33 @@ export async function joinGame(
     // 임시 사용자 ID 생성
     const userId = `user_${Math.random().toString(36).substring(2, 9)}`;
     
+    // 자리 번호가 지정되지 않았다면, 빈 좌석 찾기 유틸리티 함수 사용
+    let finalSeatIndex = seatIndex;
+    if (finalSeatIndex === undefined) {
+      console.log('좌석 지정이 없어 빈 자리를 찾아 배정합니다.');
+      
+      // 새로 추가된 빈 좌석 찾기 유틸리티 함수 사용
+      const emptySeat = await findEmptySeat(gameId);
+      
+      if (emptySeat === null) {
+        console.error('빈 좌석이 없습니다.');
+        throw handleGameError(null, ErrorType.GAME_FULL, 'joinGame');
+      }
+      
+      finalSeatIndex = emptySeat;
+      console.log(`자동 배정된 좌석: ${finalSeatIndex}`);
+    } else {
+      // 지정된 좌석이 이미 점유되어 있는지 확인
+      const isOccupied = await isSeatOccupied(finalSeatIndex, playerId, gameId);
+      
+      if (isOccupied) {
+        console.error(`지정한 좌석 ${finalSeatIndex}은 이미 다른 플레이어가 사용 중입니다.`);
+        throw handleGameError(null, ErrorType.INVALID_STATE, 'joinGame:seat_taken');
+      }
+    }
+    
+    console.log(`플레이어 생성 - ID: ${playerId}, 좌석: ${finalSeatIndex}`);
+    
     // 플레이어 생성 - 트랜잭션으로 변경하여 일관성 보장
     try {
       const { data: playerData, error: playerError } = await supabase
@@ -242,7 +274,7 @@ export async function joinGame(
           username,
           balance: 10000,
           is_die: false,
-          seat_index: seatIndex,
+          seat_index: finalSeatIndex,
           is_ready: false
         })
         .select();
@@ -251,12 +283,12 @@ export async function joinGame(
         throw handleDatabaseError(playerError, 'joinGame');
       }
       
-      console.log('플레이어 참가 성공:', playerId);
+      console.log('플레이어 참가 성공:', playerId, '좌석:', finalSeatIndex);
       
       // 로컬 스토리지에 사용자 정보 저장
       localStorage.setItem(`game_${gameId}_user_id`, userId);
       localStorage.setItem(`game_${gameId}_player_id`, playerId);
-      localStorage.setItem(`game_${gameId}_seat_index`, String(seatIndex));
+      localStorage.setItem(`game_${gameId}_seat_index`, String(finalSeatIndex));
       
       // 최신 게임 상태 가져오기
       const gameState = await getGameState(gameId);
@@ -466,7 +498,32 @@ export async function startDebugGame(gameId: string): Promise<void> {
 
     console.log(`디버그 게임 시작: ${gameId} (${gameMode}장 모드)`);
 
-    // 시간 제한 타이머는 디버그 모드에서는 아예 설정하지 않음
+    // 게임 시작 후 베팅 시간 타이머 설정
+    setTimeout(async () => {
+      try {
+        // 게임 상태 다시 확인 (중간에 베팅이 완료되었을 수 있음)
+        const { data: currentGame, error: currentGameError } = await supabase
+          .from('games')
+          .select('status, current_turn, betting_end_time, betting_round')
+          .eq('id', gameId)
+          .single();
+        
+        if (currentGameError) {
+          console.error('게임 상태 확인 중 오류:', currentGameError);
+          return;
+        }
+        
+        // 게임이 진행 중이고 첫 번째 플레이어의 차례이며 베팅 시간이 만료된 경우
+        if (currentGame && currentGame.status === 'playing' && 
+            currentGame.current_turn === firstPlayerId && 
+            new Date(currentGame.betting_end_time) <= new Date()) {
+          console.log(`게임 ${gameId}: 베팅 타임아웃, 자동 폴드 처리`);
+          await handleBettingTimeout(gameId);
+        }
+      } catch (err) {
+        console.error('베팅 타이머 처리 중 오류:', err);
+      }
+    }, BETTING_TIME_LIMIT_MS);
   } catch (error: any) {
     console.error('디버그 게임 시작 오류:', error);
     throw error;
@@ -679,188 +736,6 @@ async function checkAllPlayersMatchedBet(gameId: string, players: Player[]): Pro
   // 게임 시작 이후 각 플레이어별 마지막 베팅 가져오기
   const playerLastBets: Record<string, number> = {};
   
-  for (const player of activePlayers) {
-    const { data, error } = await supabase
-      .from('game_actions')
-      .select('*')
-      .eq('game_id', gameId)
-      .eq('player_id', player.id)
-      .in('action_type', ['bet', 'call', 'raise', 'half', 'check'])
-      .order('created_at', { ascending: false })
-      .limit(1);
-      
-    if (error || !data || data.length === 0) {
-      return false; // 데이터가 없으면 아직 일치하지 않음
-    }
-    
-    playerLastBets[player.id] = data[0].amount || 0;
-  }
-  
-  // 베팅액이 모두 같은지 확인
-  const betAmounts = Object.values(playerLastBets);
-  return betAmounts.every(amount => amount === betAmounts[0]);
-}
-
-// 다음 플레이어 턴 가져오기
-function getNextPlayerTurn(players: Player[], currentPlayerId: string): string {
-  console.log('getNextPlayerTurn - 현재 플레이어:', currentPlayerId);
-  console.log('getNextPlayerTurn - 전체 플레이어 수:', players.length);
-  
-  // 데이터 유효성 검사
-  if (!players || !Array.isArray(players) || players.length === 0) {
-    console.error('getNextPlayerTurn - 유효한 플레이어 목록이 없습니다');
-    return '';
-  }
-  
-  if (!currentPlayerId) {
-    console.error('getNextPlayerTurn - 현재 플레이어 ID가 없습니다');
-    // 아무 플레이어나 선택
-    const anyActivePlayers = players.filter(p => !p.is_die);
-    return anyActivePlayers.length > 0 ? anyActivePlayers[0].id : '';
-  }
-  
-  // 짱객히 검사 - players의 각 요소가 Player 타입인지 확인
-  const validPlayers = players.filter(p => p && typeof p === 'object' && p.id);
-  console.log('getNextPlayerTurn - 유효한 플레이어 수:', validPlayers.length);
-  
-  if (validPlayers.length === 0) {
-    console.error('getNextPlayerTurn - 유효한 플레이어가 없습니다');
-    return '';
-  }
-  
-  // is_die 속성이 확실히 있는지 확인
-  const activePlayers = validPlayers.filter(p => {
-    if (p.is_die === undefined) {
-      console.warn(`getNextPlayerTurn - 플레이어 ${p.id}의 is_die 속성이 정의되지 않았습니다`);
-      return true; // 정의되지 않은 경우 살아있다고 간주
-    }
-    return !p.is_die;
-  });
-  
-  console.log('getNextPlayerTurn - 활성 플레이어 수:', activePlayers.length);
-  
-  if (activePlayers.length <= 1) {
-    console.log('getNextPlayerTurn - 남은 플레이어가 1명 이하입니다');
-    return activePlayers.length === 1 ? activePlayers[0].id : '';
-  }
-  
-  const currentIndex = activePlayers.findIndex(p => p.id === currentPlayerId);
-  console.log('getNextPlayerTurn - 현재 인덱스:', currentIndex);
-  
-  // 현재 플레이어를 찾지 못한 경우
-  if (currentIndex === -1) {
-    console.log('getNextPlayerTurn - 현재 플레이어를 활성 플레이어 목록에서 찾을 수 없음, 첫 번째 플레이어 선택');
-    return activePlayers[0].id;
-  }
-  
-  const nextIndex = (currentIndex + 1) % activePlayers.length;
-  console.log('getNextPlayerTurn - 다음 인덱스:', nextIndex);
-  console.log('getNextPlayerTurn - 다음 플레이어:', activePlayers[nextIndex].id);
-  
-  return activePlayers[nextIndex].id;
-}
-
-/**
- * 메시지 전송
- */
-export async function sendMessage(gameId: string, playerId: string, content: string): Promise<void> {
-  if (!content.trim()) {
-    throw handleGameError(null, ErrorType.INVALID_ACTION, 'sendMessage');
-  }
-  
-  // 플레이어 정보 가져오기
-  const { data: playerData, error: playerError } = await supabase
-    .from('players')
-    .select('username, user_id')
-    .eq('id', playerId)
-    .single();
-  
-  if (playerError || !playerData) {
-    throw handleResourceNotFoundError('player', playerId, playerError);
-  }
-
-  // 메시지 ID 생성
-  const messageId = uuidv4();
-  const timestamp = new Date().toISOString();
-  
-  // 메시지 객체 생성
-  const messageData = {
-    id: messageId,
-    game_id: gameId,
-    user_id: playerData.user_id,
-    username: playerData.username,
-    content: content,
-    created_at: timestamp
-  };
-  
-  // 메시지 저장
-  const { error: messageError } = await supabase
-    .from('messages')
-    .insert(messageData);
-  
-  if (messageError) {
-    throw handleDatabaseError(messageError, 'sendMessage');
-  }
-}
-
-/**
- * 게임 액션 기록
- */
-async function recordGameAction(
-  gameId: string,
-  actionType: BetActionType | 'show' | 'start' | 'regame' | 'draw_card' | 'select_cards',
-  playerId: string | null,
-  amount?: number,
-  bettingRound?: number
-): Promise<void> {
-  try {
-    const id = uuidv4();
-    const { error } = await supabase
-      .from('game_actions')
-      .insert({
-        id,
-        game_id: gameId,
-        action_type: actionType,
-        player_id: playerId,
-        amount,
-        betting_round: bettingRound,
-        created_at: new Date().toISOString()
-      });
-
-    if (error) {
-      throw handleDatabaseError(error, 'Recording game action');
-    }
-  } catch (error) {
-    console.error('Error recording game action:', error);
-    throw handleGameError(error, ErrorType.GAME_ACTION_ERROR, 'Failed to record game action');
-  }
-}
-
-/**
- * 셔플된 카드 덱 생성
- */
-function createShuffledDeck(): number[] {
-  // 1부터 20까지의 카드 생성 (섯다 카드)
-  const deck = Array.from({ length: 20 }, (_, i) => i + 1);
-  
-  // 덱 셔플 (Fisher-Yates 알고리즘)
-  for (let i = deck.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [deck[i], deck[j]] = [deck[j], deck[i]];
-  }
-  
-  return deck;
-}
-
-/**
- * 모든 플레이어가 턴을 가졌는지 확인
- */
-async function checkAllPlayersHadTurn(gameId: string, players: Player[]): Promise<boolean> {
-  const activePlayers = players.filter(p => !p.is_die);
-  
-  // 게임 시작 이후 각 플레이어별 가장 최근 액션 확인
-  const playerLastActions = new Set<string>();
-  
   // 게임의 마지막 라운드 시작 시간 찾기 (start 액션 또는 가장 오래된 베팅 액션)
   const { data: startAction, error: startError } = await supabase
     .from('game_actions')
@@ -895,11 +770,11 @@ async function checkAllPlayersHadTurn(gameId: string, players: Player[]): Promis
       return false; // 플레이어가 현재 라운드에서 액션을 취하지 않았음
     }
     
-    playerLastActions.add(player.id);
+    playerLastBets[player.id] = data[0].amount || 0;
   }
   
   // 모든 활성 플레이어가 액션을 취했는지 확인
-  return playerLastActions.size === activePlayers.length;
+  return playerLastBets.size === activePlayers.length;
 }
 
 /**
@@ -1201,62 +1076,108 @@ async function handleRegame(gameId: string): Promise<void> {
   }, REGAME_WAIT_TIME_MS);
 }
 
-// 플레이어 좌석 업데이트
-export async function updateSeat(gameId: string, playerId: string, seatIndex: number): Promise<void> {
+/**
+ * 플레이어 좌석 업데이트 - 통합 함수
+ * gameId와 roomId 모두 처리 가능하도록 개선
+ */
+export async function updateSeat(gameId: string | null, playerId: string, seatIndex: number): Promise<void> {
+  console.log(`[updateSeat] Started - Game: ${gameId}, Player: ${playerId}, Seat: ${seatIndex}`);
+  
   try {
-    // 해당 좌석이 이미 사용 중인지 확인
-    const { data: existingPlayer, error: checkError } = await supabase
-      .from('players')
-      .select('id, room_id')
-      .eq('game_id', gameId)
-      .eq('seat_index', seatIndex);
-
-    if (checkError) {
-      console.error('좌석 확인 오류:', checkError);
-      throw handleDatabaseError(checkError, 'updateSeat');
-    }
-
-    // 이미 다른 플레이어가 해당 좌석에 앉아있으면 오류
-    if (existingPlayer && existingPlayer.length > 0 && existingPlayer[0].id !== playerId) {
-      throw handleGameError(null, ErrorType.INVALID_STATE, 'updateSeat');
-    }
-
-    // 플레이어 정보 찾기
+    // 1. 플레이어 정보 먼저 조회
     const { data: player, error: playerError } = await supabase
       .from('players')
-      .select('id, room_id')
+      .select('seat_index, room_id, game_id')
       .eq('id', playerId)
-      .eq('game_id', gameId)
       .single();
 
     if (playerError || !player) {
-      console.error('플레이어 정보 조회 오류:', playerError);
-      throw handleDatabaseError(playerError, 'updateSeat');
+      console.error('[updateSeat] Player info query error:', playerError);
+      throw handleDatabaseError(playerError, 'updateSeat:player_query');
     }
 
-    // 방 ID가 있는 경우 roomApi의 changeSeat 함수 사용
-    if (player.room_id) {
-      const { changeSeat } = require('./roomApi');
-      await changeSeat(player.room_id, playerId, seatIndex);
+    console.log('[updateSeat] Current player info:', player);
+    
+    // 2. 현재 동일한 좌석인지 확인
+    if (player.seat_index === seatIndex) {
+      console.log('[updateSeat] Player already in the requested seat. No change needed.');
       return;
     }
+    
+    // 3. 게임 상태 확인 - 게임이 있는 경우에만 대기 상태 확인
+    if (gameId) {
+      const { data: gameData, error: gameError } = await supabase
+        .from('games')
+        .select('status')
+        .eq('id', gameId)
+        .single();
+        
+      if (gameError || !gameData) {
+        console.error('[updateSeat] Game status check error:', gameError);
+        throw handleDatabaseError(gameError, 'updateSeat:game_check');
+      }
+      
+      if (gameData.status !== 'waiting') {
+        console.error('[updateSeat] Cannot change seats when game is not in waiting state:', gameData.status);
+        throw handleGameError(null, ErrorType.INVALID_STATE, 'updateSeat:game_not_waiting');
+      }
+    }
+    
+    // 4. 좌석이 이미 다른 플레이어에게 점유되었는지 확인
+    const isOccupied = await isSeatOccupied(seatIndex, playerId, gameId || undefined, player.room_id || undefined);
 
-    // 방 ID가 없는 경우 직접 좌석 업데이트
-    const { error: updateError } = await supabase
+    if (isOccupied) {
+      console.error(`[updateSeat] Seat ${seatIndex} is already taken by another player`);
+      throw handleGameError(null, ErrorType.INVALID_STATE, 'updateSeat:seat_taken');
+    }
+
+    // 5. 좌석 업데이트 - 항상 단일 업데이트 쿼리 사용
+    console.log('[updateSeat] Updating seat in database:', {playerId, seatIndex});
+    
+    const updateBuilder = supabase
       .from('players')
       .update({ seat_index: seatIndex })
-      .eq('id', playerId)
-      .eq('game_id', gameId);
+      .eq('id', playerId);
+      
+    // 적절한 필터 추가 (gameId 또는 roomId)
+    if (gameId) {
+      updateBuilder.eq('game_id', gameId);
+    }
+    if (player.room_id) {
+      updateBuilder.eq('room_id', player.room_id);
+    }
+    
+    const { error: updateError } = await updateBuilder;
 
     if (updateError) {
-      console.error('좌석 업데이트 오류:', updateError);
-      throw handleDatabaseError(updateError, 'updateSeat');
+      console.error('[updateSeat] Database update error:', updateError);
+      throw handleDatabaseError(updateError, 'updateSeat:db_update');
     }
+    
+    // 6. localStorage 업데이트
+    if (gameId) {
+      localStorage.setItem(`game_${gameId}_seat_index`, String(seatIndex));
+      console.log('[updateSeat] Game seat localStorage updated');
+    }
+    if (player.room_id) {
+      localStorage.setItem(`room_${player.room_id}_seat_index`, String(seatIndex));
+      console.log('[updateSeat] Room seat localStorage updated');
+    }
+    
+    // 7. 업데이트 검증 (디버깅용)
+    const { data: updatedPlayer } = await supabase
+      .from('players')
+      .select('id, username, seat_index, room_id, game_id')
+      .eq('id', playerId)
+      .single();
+      
+    console.log('[updateSeat] Player after update:', updatedPlayer);
+    console.log('[updateSeat] Seat update successful!');
   } catch (err) {
-    console.error('좌석 업데이트 중 예외 발생:', err);
+    console.error('[updateSeat] Exception occurred:', err);
     throw err;
   }
-} 
+}
 
 /**
  * 베팅 라운드 종료 및 시작
@@ -1835,7 +1756,7 @@ export async function betAction(
       }
       
       // 죽지 않은 플레이어 필터링
-      const alivePlayers = updatedPlayers.filter(p => !p.is_die);
+      const alivePlayers = updatedPlayers.filter(p => p.id !== playerId && !p.is_die);
       
       console.log('폴드 후 남은 플레이어 목록:', alivePlayers);
       
@@ -1870,7 +1791,7 @@ export async function betAction(
         return;
       }
       
-      // getNextPlayerTurn 함수 사용하여 다음 플레이어 결정
+      // getNextPlayerTurn 함수를 사용하여 다음 플레이어 결정
       const nextPlayerId = getNextPlayerTurn(activePlayers, playerId);
       console.log('다음 플레이어 ID (일반):', nextPlayerId);
       
@@ -1881,86 +1802,7 @@ export async function betAction(
       }
       
       // 다음 플레이어 정보 찾기
-      const nextPlayerIndex = activePlayers.findIndex((p: any) => p.id === nextPlayerId);
-      if (nextPlayerIndex >= 0) {
-        nextPlayer = activePlayers[nextPlayerIndex];
-      }
-    }
-    
-    // 다음 플레이어를 찾지 못한 경우
-    if (!nextPlayer) {
-      console.error('다음 플레이어 정보를 찾을 수 없습니다. DB에서 직접 조회합니다.');
-      
-      // DB에서 직접 조회 시도
-      const { data: nextPlayerData, error: nextPlayerError } = await supabase
-        .from('players')
-        .select('*')
-        .eq('game_id', gameId)
-        .eq('is_die', false)
-        .order('seat_index', { ascending: true });
-        
-      if (nextPlayerError || !nextPlayerData || nextPlayerData.length === 0) {
-        console.error('다음 플레이어 정보 가져오기 오류:', nextPlayerError);
-        console.log('게임을 종료합니다 (다음 플레이어 찾기 실패)');
-        await finishGame(gameId);
-        return;
-      }
-      
-      // 현재 플레이어가 아닌 첫 번째 플레이어 선택
-      nextPlayer = nextPlayerData.find(p => p.id !== playerId) || nextPlayerData[0];
-    }
-
-    // 모든 플레이어가 베팅을 맞췄는지 확인
-    const allPlayersMatched = activePlayers.every(
-      (p: any) => p.id === playerId || p.bet === newBettingValue || p.is_die
-    );
-
-    if (allPlayersMatched) {
-      // 베팅 라운드 종료
-      await finishBettingRound(gameId);
-    } else {
-      // 다음 플레이어로 차례 넘김 - 최신 플레이어 목록 가져오기
-      console.log(`차례 업데이트 시도 - 현재 진행 중: ${playerId}`);
-      
-      // 최신 활성 플레이어 정보 가져오기
-      const { data: latestPlayers, error: latestPlayersError } = await supabase
-        .from('players')
-        .select('*')
-        .eq('game_id', gameId)
-        .order('seat_index', { ascending: true });
-      
-      if (latestPlayersError) {
-        console.error('최신 플레이어 정보 가져오기 오류:', latestPlayersError);
-        throw handleDatabaseError(latestPlayersError, 'betAction - 최신 플레이어 정보');
-      }
-      
-      if (!latestPlayers || latestPlayers.length === 0) {
-        console.error('최신 플레이어 정보를 찾을 수 없습니다');
-        throw handleGameError(null, ErrorType.GAME_DATA_ERROR, 'betAction - 최신 플레이어 정보');
-      }
-      
-      // 활성 플레이어만 필터링
-      const latestActivePlayers = latestPlayers.filter(p => !p.is_die);
-      console.log('최신 활성 플레이어 수:', latestActivePlayers.length);
-      
-      if (latestActivePlayers.length <= 1) {
-        console.log('최신 활성 플레이어가 1명 이하입니다. 게임을 종료합니다.');
-        await finishGame(gameId);
-        return;
-      }
-      
-      // getNextPlayerTurn 함수를 사용하여 다음 플레이어 결정
-      const nextPlayerId = getNextPlayerTurn(latestActivePlayers, playerId);
-      console.log('최신 데이터로 다음 플레이어 결정:', nextPlayerId);
-      
-      if (!nextPlayerId) {
-        console.error('다음 플레이어를 찾을 수 없습니다. 게임을 종료합니다.');
-        await finishGame(gameId);
-        return;
-      }
-      
-      // 다음 플레이어 정보 찾기
-      const nextPlayerInfo = latestActivePlayers.find(p => p.id === nextPlayerId);
+      const nextPlayerInfo = activePlayers.find(p => p.id === nextPlayerId);
       if (!nextPlayerInfo) {
         console.error('다음 플레이어 정보를 찾을 수 없습니다:', nextPlayerId);
         throw handleGameError(null, ErrorType.PLAYER_NOT_FOUND, 'betAction - 다음 플레이어 정보');
@@ -2254,5 +2096,146 @@ export async function cleanupAfterGameFinish(gameId: string): Promise<void> {
     console.log(`게임 ${gameId} 종료 후 처리 완료`);
   } catch (err) {
     console.error(`게임 ${gameId} 종료 후 처리 중 오류:`, err);
+  }
+}
+
+/**
+ * 채팅 메시지 전송
+ */
+export async function sendMessage(gameId: string, playerId: string, message: string): Promise<void> {
+  try {
+    console.log(`[sendMessage] Game: ${gameId}, Player: ${playerId}, Message: ${message}`);
+    
+    // 1. 플레이어 정보 확인
+    const { data: player, error: playerError } = await supabase
+      .from('players')
+      .select('username')
+      .eq('id', playerId)
+      .eq('game_id', gameId)
+      .single();
+    
+    if (playerError || !player) {
+      console.error('[sendMessage] Player info query error:', playerError);
+      throw handleDatabaseError(playerError, 'sendMessage:player_query');
+    }
+    
+    // 2. 메시지 저장
+    const { error: messageError } = await supabase
+      .from('messages')
+      .insert({
+        game_id: gameId,
+        player_id: playerId,
+        username: player.username,
+        content: message,
+        created_at: new Date().toISOString()
+      });
+    
+    if (messageError) {
+      console.error('[sendMessage] Message insert error:', messageError);
+      throw handleDatabaseError(messageError, 'sendMessage:message_insert');
+    }
+    
+    console.log('[sendMessage] Message sent successfully');
+  } catch (err) {
+    console.error('[sendMessage] Exception occurred:', err);
+    throw err;
+  }
+}
+
+/**
+ * ube48 uc88cuc11d ucc3euae30 uc720ud2f8ub9acud2f0 ud568uc218
+ * uc785ub825ub41c gameId ub610ub294 roomIduc5d0 ub300ud574 ucc98uc74cuc73cub85c ube48 uc88cuc11duc744 ucc3euc544 ubc18ud658
+ */
+export async function findEmptySeat(gameId?: string, roomId?: string): Promise<number | null> {
+  console.log(`[findEmptySeat] Finding empty seat - Game: ${gameId}, Room: ${roomId}`);
+  
+  try {
+    // uc88cuc11d uc870ud68cub97c uc704ud55c ucffcub9ac ube4cub354
+    const queryBuilder = supabase
+      .from('players')
+      .select('seat_index');
+    
+    // gameId ub610ub294 roomId ucc98ub9ac
+    if (gameId) {
+      queryBuilder.eq('game_id', gameId);
+    }
+    if (roomId) {
+      queryBuilder.eq('room_id', roomId);
+    }
+    
+    const { data: players, error } = await queryBuilder;
+    
+    if (error) {
+      console.error('[findEmptySeat] Database query error:', error);
+      throw handleDatabaseError(error, 'findEmptySeat');
+    }
+    
+    // ucd5cub300 ud50cub808uc774uc5b4uac00 uc544ub2cc ub2e4ub978 ud50cub808uc774uc5b4uac00 uc88cuc11duc744 uc810uc720ud558uace0 uc788ub294uc9c0 ud655uc778
+    const maxPlayers = 5;
+    
+    // uc774ubbf8 uc0acuc6a9uc911uc778 uc88cuc11d ubc88ud638ub4e4
+    const occupiedSeats = players
+      ? players.map(p => p.seat_index).filter(s => s !== null && s !== undefined)
+      : [];
+      
+    console.log('[findEmptySeat] Occupied seats:', occupiedSeats);
+    
+    // ube48 uc88cuc11d ucc3euae30 (0ubd80ud130 maxPlayers-1uae4cuc9c0 ud655uc778)
+    for (let i = 0; i < maxPlayers; i++) {
+      if (!occupiedSeats.includes(i)) {
+        console.log(`[findEmptySeat] Found empty seat: ${i}`);
+        return i;
+      }
+    }
+    
+    // ubaa8ub4e0 uc88cuc11duc774 ucc28uc788uc73cuba74 null ubc18ud658
+    console.log('[findEmptySeat] No empty seats available');
+    return null;
+  } catch (err) {
+    console.error('[findEmptySeat] Exception occurred:', err);
+    throw err;
+  }
+}
+
+/**
+ * uc88cuc11d uc810uc720 uc5ecubd80 ud655uc778 ud568uc218
+ * ud574ub2f9 uc790ub9acuac00 uc774ubbf8 ub2e4ub978 ud50cub808uc774uc5b4uc5d0 uc758ud574 uc810uc720ub418uc5c8ub294uc9c0 ud655uc778
+ */
+export async function isSeatOccupied(
+  seatIndex: number,
+  playerId: string,
+  gameId?: string,
+  roomId?: string
+): Promise<boolean> {
+  console.log(`[isSeatOccupied] Checking seat ${seatIndex} - Player: ${playerId}, Game: ${gameId}, Room: ${roomId}`);
+  
+  try {
+    const queryBuilder = supabase
+      .from('players')
+      .select('id, username')
+      .eq('seat_index', seatIndex);
+      
+    // gameIdub098 roomId ucc98ub9ac
+    if (gameId) {
+      queryBuilder.eq('game_id', gameId);
+    }
+    if (roomId) {
+      queryBuilder.eq('room_id', roomId);
+    }
+    
+    const { data: existingSeat, error } = await queryBuilder;
+
+    if (error) {
+      console.error('[isSeatOccupied] Database query error:', error);
+      throw handleDatabaseError(error, 'isSeatOccupied');
+    }
+    
+    console.log('[isSeatOccupied] Seat check result:', existingSeat);
+    
+    // ud604uc7ac ud50cub808uc774uc5b4uac00 uc544ub2cc ub2e4ub978 ud50cub808uc774uc5b4uac00 uc88cuc11duc744 uc810uc720ud558uace0 uc788ub294uc9c0 ud655uc778
+    return existingSeat && existingSeat.length > 0 && existingSeat[0].id !== playerId;
+  } catch (err) {
+    console.error('[isSeatOccupied] Exception occurred:', err);
+    throw err;
   }
 }

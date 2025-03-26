@@ -161,51 +161,36 @@ export function TablePlayer({ player, isReady, mode = 2, bettingRound = 1 }: Tab
 }
 
 function getPositionStyles(position: number): { container: string; cards: string } {
-  // 8uac1c uc704uce58uc5d0 ub9deuac8c uc2a4ud0c0uc77c uc124uc815 (uc6d0ud615 ud14cuc774ube14 uae30uc900)
-  switch (position % 8) {
+  // 5uac1c uc704uce58uc5d0 ub9deuac8c uc2a4ud0c0uc77c uc124uc815 (uc6d0ud615 ud14cuc774ube14 uae30uc900)
+  switch (position % 5) {
     case 0: // ud558ub2e8 uc911uc559
       return {
-        container: 'bottom-[5%] left-1/2 -translate-x-1/2',
+        container: 'bottom-[8%] left-1/2 -translate-x-1/2',
         cards: 'mt-4'
       };
     case 1: // uc624ub978ucabd ud558ub2e8
       return {
-        container: 'bottom-[20%] right-[10%]',
+        container: 'bottom-[25%] right-[15%]',
         cards: 'mt-4'
       };
-    case 2: // uc624ub978ucabd
+    case 2: // uc624ub978ucabd uc0c1ub2e8
       return {
-        container: 'right-[5%] top-1/2 -translate-y-1/2',
-        cards: 'ml-4'
-      };
-    case 3: // uc624ub978ucabd uc0c1ub2e8
-      return {
-        container: 'top-[20%] right-[10%]',
+        container: 'top-[25%] right-[15%]',
         cards: 'mb-4 flex-row-reverse'
       };
-    case 4: // uc0c1ub2e8 uc911uc559
+    case 3: // uc0c1ub2e8 uc911uc559
       return {
-        container: 'top-[5%] left-1/2 -translate-x-1/2',
+        container: 'top-[8%] left-1/2 -translate-x-1/2',
         cards: 'mb-4 flex-row-reverse'
       };
-    case 5: // uc67cuc058 uc0c1ub2e8
+    case 4: // uc67cucabd uc0c1ub2e8
       return {
-        container: 'top-[20%] left-[10%]',
+        container: 'top-[25%] left-[15%]',
         cards: 'mb-4 flex-row-reverse'
-      };
-    case 6: // uc67cuc058
-      return {
-        container: 'left-[5%] top-1/2 -translate-y-1/2',
-        cards: 'mr-4 flex-row-reverse'
-      };
-    case 7: // uc67cuc058 ud558ub2e8
-      return {
-        container: 'bottom-[20%] left-[10%]',
-        cards: 'mt-4 flex-row'
       };
     default:
       return {
-        container: 'bottom-[5%] left-1/2 -translate-x-1/2',
+        container: 'bottom-[8%] left-1/2 -translate-x-1/2',
         cards: 'mt-4'
       };
   }
