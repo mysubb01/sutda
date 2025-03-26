@@ -98,7 +98,6 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
   // 자리 변경 처리 함수
   const handleSeatChange = async (seatIndex: number) => {
     try {
-      // 좌석 변경 중 플래그 설정 (폴링 일시 중지)
       setIsSeatChanging(true);
       
       // 좌석 변경 API 호출
@@ -110,91 +109,118 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
       // 로컬 스토리지에도 좌석 정보 저장 (복구 용도)
       localStorage.setItem(`game_${gameId}_seat_index`, String(seatIndex));
       
-      // 강제로 상태 업데이트 (변경된 좌석 정보 반영)
-      await fetchGameState();
-      
       console.log('좌석 변경 완료:', seatIndex);
       
-      // 폴링 재개 - 약간의 지연 추가
+      // 좌석 변경 상태 해제 - 실시간 업데이트가 자동으로 처리함
       setTimeout(() => {
         setIsSeatChanging(false);
-        console.log('좌석 변경 완료 후 폴링 재개');
-      }, 1000);
+      }, 500);
     } catch (err) {
       console.error('좌석 변경 오류:', err);
       toast.error('좌석을 변경할 수 없습니다.');
-      setIsSeatChanging(false); // 오류 발생 시에도 폴링 재개
+      setIsSeatChanging(false);
     }
   };
   
-  // 게임 참가 및 구독 설정
+  // 게임 참가 및 실시간 구독 설정
   useEffect(() => {
     // 로컬 스토리지에서 플레이어 정보 가져오기
     const storedPlayerId = localStorage.getItem(`game_${gameId}_player_id`);
     const storedUsername = localStorage.getItem(`game_${gameId}_username`);
+    
+    // 초기 데이터 로드
+    fetchGameState();
+    fetchMessages();
     
     if (storedPlayerId && storedUsername) {
       console.log('저장된 플레이어 정보 발견:', storedPlayerId, storedUsername);
       setPlayerId(storedPlayerId);
       setUsername(storedUsername);
       setIsObserver(false); // 이미 참가한 플레이어인 경우 관찰자 모드 해제
-      
-      // 최근 자리 변경 정보 확인 (존재하면 복원 시도)
-      const lastSeatIndex = localStorage.getItem(`game_${gameId}_seat_index`);
-      
-      // 초기 데이터 로드
-      fetchGameState();
-      fetchMessages();
-      
-      // 좌석 변경 중 플래그
-      let isChangingSeat = false;
-      
-      // 폴링 설정 - 정기적으로 데이터 갱신
-      const gameStateInterval = setInterval(async () => {
-        console.log('게임 상태 폴링...', isSeatChanging ? '(좌석 변경 중)' : '');
-        
-        // 좌석 변경 중이 아닐 때만 폴링
-        if (!isSeatChanging) {
-          await fetchGameState();
-        }
-      }, 1000); // 1초마다로 변경하여 반응성 향상
-      
-      const messagesInterval = setInterval(() => {
-        console.log('메시지 폴링...');
-        fetchMessages();
-      }, 1000); // 1초마다
-      
-      // 컴포넌트 언마운트 시 인터벌 정리
-      return () => {
-        clearInterval(gameStateInterval);
-        clearInterval(messagesInterval);
-        console.log('폴링 인터벌 정리 완료');
-      };
-    } else {
-      // 플레이어 정보가 없으면 기본 게임 상태 로딩
-      fetchGameState();
-      fetchMessages();
-      
-      // 관찰자 모드를 위한 폴링 설정
-      const observerGameStateInterval = setInterval(() => {
-        fetchGameState();
-      }, 2000); // 2초마다 (관찰자는 더 낮은 빈도로 업데이트)
-      
-      const observerMessagesInterval = setInterval(() => {
-        fetchMessages();
-      }, 2000); // 2초마다
-      
-      return () => {
-        clearInterval(observerGameStateInterval);
-        clearInterval(observerMessagesInterval);
-      };
     }
+    
+    // 실시간 구독 설정
+    const gameChannel = supabase
+      .channel(`game:${gameId}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'games',
+        filter: `id=eq.${gameId}`
+      }, (payload) => {
+        console.log('게임 상태 업데이트 수신:', payload);
+        fetchGameState();
+      })
+      .subscribe((status) => {
+        console.log('게임 채널 구독 상태:', status);
+        setIsSubscribed(status === 'SUBSCRIBED');
+      });
+    
+    // 플레이어 테이블 실시간 구독
+    const playersChannel = supabase
+      .channel(`players:${gameId}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'players',
+        filter: `game_id=eq.${gameId}`
+      }, (payload) => {
+        console.log('플레이어 정보 업데이트 수신:', payload);
+        fetchGameState();
+      })
+      .subscribe((status) => {
+        console.log('플레이어 채널 구독 상태:', status);
+      });
+    
+    // 메시지 실시간 구독
+    const messagesChannel = supabase
+      .channel(`messages:${gameId}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `game_id=eq.${gameId}`
+      }, (payload) => {
+        console.log('새 메시지 수신:', payload);
+        // 새 메시지를 기존 메시지 배열에 추가
+        setMessages((prev) => [...prev, payload.new as Message]);
+      })
+      .subscribe((status) => {
+        console.log('메시지 채널 구독 상태:', status);
+      });
+    
+    // 게임 액션 실시간 구독
+    const actionsChannel = supabase
+      .channel(`actions:${gameId}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'game_actions',
+        filter: `game_id=eq.${gameId}`
+      }, (payload) => {
+        console.log('새 게임 액션 수신:', payload);
+        // 게임 액션 발생 시 게임 상태 갱신
+        fetchGameState();
+      })
+      .subscribe((status) => {
+        console.log('액션 채널 구독 상태:', status);
+      });
+    
+    // 컴포넌트 언마운트 시 구독 정리
+    return () => {
+      gameChannel.unsubscribe();
+      playersChannel.unsubscribe();
+      messagesChannel.unsubscribe();
+      actionsChannel.unsubscribe();
+      console.log('실시간 구독 정리 완료');
+    };
   }, [gameId]);
   
-  // 실시간 구독 설정 - 폴링으로 대체되어 필요 없음
-  const setupSubscriptions = (pid: string) => {
-    console.log('폴링 방식으로 변경되어 실시간 구독이 사용되지 않습니다.');
-    return () => {}; // 빈 정리 함수
+  // 실시간 연결 재설정 함수
+  const reconnectRealtimeChannels = () => {
+    console.log('실시간 연결 재시도...');
+    // 페이지 새로고침으로 모든 구독 재설정
+    window.location.reload();
   };
 
   // 게임 참가 처리 - 관찰자 모드에서는 호출되지 않음
