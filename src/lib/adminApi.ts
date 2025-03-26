@@ -1,4 +1,37 @@
 import { supabase } from './supabase';
+import { v4 as uuidv4 } from 'uuid';
+
+/**
+ * 시스템 메시지 전송 (관리자 알림용)
+ */
+export async function sendSystemMessage(gameId: string, content: string): Promise<void> {
+  if (!gameId) {
+    throw new Error('Invalid game ID');
+  }
+
+  const id = uuidv4();
+  const timestamp = new Date().toISOString();
+
+  // 시스템 메시지 데이터 구성
+  const messageData = {
+    id,
+    game_id: gameId,
+    user_id: 'system',  // 시스템 메시지는 user_id를 'system'으로 설정
+    username: '시스템',  // 시스템 메시지 표시 이름
+    content: content,
+    created_at: timestamp
+  };
+  
+  // 메시지 저장
+  const { error: messageError } = await supabase
+    .from('messages')
+    .insert(messageData);
+  
+  if (messageError) {
+    console.error('System message error:', messageError);
+    throw new Error('Failed to send system message');
+  }
+}
 
 /**
  * 플레이어 강퇴 API
@@ -9,7 +42,7 @@ export async function kickPlayer(playerId: string) {
     // 먼저 플레이어 정보 조회
     const { data: playerData, error: playerError } = await supabase
       .from('players')
-      .select('*')
+      .select('*, games!inner(*)')
       .eq('id', playerId)
       .single();
 
@@ -27,6 +60,15 @@ export async function kickPlayer(playerId: string) {
       throw error;
     }
 
+    // 게임이 진행 중인 경우, 시스템 메시지 전송
+    const gameData = playerData.games as any;
+    if (gameData && gameData.status === 'playing') {
+      await sendSystemMessage(
+        gameData.id, 
+        `관리자가 ${playerData.username}님을 강퇴했습니다.`
+      );
+    }
+
     return { success: true, message: '플레이어가 성공적으로 강퇴되었습니다.' };
   } catch (error: any) {
     console.error('플레이어 강퇴 중 오류 발생:', error.message);
@@ -41,6 +83,18 @@ export async function kickPlayer(playerId: string) {
  */
 export async function togglePlayerMute(playerId: string, isMuted: boolean) {
   try {
+    // 먼저 플레이어 정보 조회
+    const { data: playerData, error: playerError } = await supabase
+      .from('players')
+      .select('*, games!inner(*)')
+      .eq('id', playerId)
+      .single();
+
+    if (playerError) {
+      throw playerError;
+    }
+
+    // 채팅 금지 상태 변경
     const { error } = await supabase
       .from('players')
       .update({ is_muted: isMuted })
@@ -48,6 +102,16 @@ export async function togglePlayerMute(playerId: string, isMuted: boolean) {
 
     if (error) {
       throw error;
+    }
+
+    // 게임이 진행 중인 경우, 시스템 메시지 전송
+    const gameData = playerData.games as any;
+    if (gameData && gameData.status === 'playing') {
+      const actionMessage = isMuted 
+        ? `관리자가 ${playerData.username}님의 채팅을 금지했습니다.`
+        : `관리자가 ${playerData.username}님의 채팅 금지를 해제했습니다.`;
+
+      await sendSystemMessage(gameData.id, actionMessage);
     }
 
     return { 
@@ -141,7 +205,7 @@ export async function updatePlayerBalance(playerId: string, amount: number) {
     // 현재 플레이어 잔액 조회
     const { data: playerData, error: playerError } = await supabase
       .from('players')
-      .select('balance')
+      .select('balance, username, games!inner(*)')
       .eq('id', playerId)
       .single();
 
@@ -170,9 +234,19 @@ export async function updatePlayerBalance(playerId: string, amount: number) {
     const action = amount >= 0 ? '추가' : '차감';
     const absAmount = Math.abs(amount);
 
+    // 게임이 진행 중인 경우, 시스템 메시지 전송
+    const gameData = playerData.games as any;
+    if (gameData && gameData.status === 'playing') {
+      const actionMessage = amount >= 0
+        ? `관리자가 ${playerData.username}님의 잔액에 ${absAmount.toLocaleString()}원을 추가했습니다.`
+        : `관리자가 ${playerData.username}님의 잔액에서 ${absAmount.toLocaleString()}원을 차감했습니다.`;
+
+      await sendSystemMessage(gameData.id, actionMessage);
+    }
+
     return { 
       success: true, 
-      message: `플레이어 잔액이 ${absAmount.toLocaleString()}원 ${action}되었습니다. 현재 잔액: ${newBalance.toLocaleString()}원` 
+      message: `${playerData.username}님의 잔액이 ${absAmount.toLocaleString()}원 ${action}되었습니다. 현재 잔액: ${newBalance.toLocaleString()}원` 
     };
   } catch (error: any) {
     console.error('플레이어 잔액 수정 중 오류 발생:', error.message);
