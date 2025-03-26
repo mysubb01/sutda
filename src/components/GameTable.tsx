@@ -229,7 +229,11 @@ export function GameTable({
 
   // 닉네임 입력 후 참가하기
   const handleJoinWithNickname = async () => {
-    if (!selectedSeat && selectedSeat !== 0) return;
+    if (!selectedSeat && selectedSeat !== 0) {
+      toast.error('선택된 좌석이 없습니다.');
+      return;
+    }
+    
     if (!username.trim()) {
       toast.error('닉네임을 입력해주세요.');
       return;
@@ -238,24 +242,50 @@ export function GameTable({
     try {
       setIsJoining(true);
       console.log(`참가 시도: 좌석 ${selectedSeat}, 닉네임 ${username}`);
-      const { playerId } = await joinGame(gameId, username, selectedSeat);
       
-      // 플레이어 ID 저장
+      // 비동기 작업 시작 전 메시지 표시
+      toast.loading('게임에 참가 중입니다...', { id: 'joining' });
+      
+      // 비동기 작업 실행
+      const response = await joinGame(gameId, username, selectedSeat);
+      const { playerId } = response;
+      
+      // 성공 시 로컬 스토리지에 플레이어 정보 저장
       localStorage.setItem(`game_${gameId}_player_id`, playerId);
       localStorage.setItem(`game_${gameId}_username`, username);
+      localStorage.setItem(`game_${gameId}_seat_index`, String(selectedSeat));
+      
+      // 성공 메시지 표시
+      toast.success('게임에 참가했습니다!', { id: 'joining' });
+      
+      // 모달 닫기
+      setShowNicknameModal(false);
+      
+      // 상태 업데이트 전 약간의 딜레이
+      await new Promise(resolve => setTimeout(resolve, 300));
       
       // 부모 컴포넌트에 참가 알림
       if (onPlayerJoined) {
         onPlayerJoined(playerId, username);
       }
       
-      toast.success('게임에 참가했습니다!');
-      setShowNicknameModal(false);
-      fetchGameState(); // 게임 상태 새로고침
+      // 게임 상태 새로고침
+      fetchGameState();
     } catch (error) {
       console.error('참가 오류:', error);
-      toast.error('게임에 참가할 수 없습니다.');
+      
+      // 실패 메시지 표시
+      toast.error('게임에 참가할 수 없습니다. 다시 시도해주세요.', { id: 'joining' });
+      
+      // 에러 세부사항에 따른 구체적인 메시지 표시
+      const errorMessage = error instanceof Error ? error.message : '알 수 없는 오류';
+      if (errorMessage.includes('INVALID_STATE')) {
+        toast.error('현재 게임에 참가할 수 없습니다. 게임이 이미 시작되었을 수 있습니다.');
+      } else if (errorMessage.includes('DB_ERROR')) {
+        toast.error('데이터베이스 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
+      }
     } finally {
+      // 상태 정리
       setIsJoining(false);
     }
   };

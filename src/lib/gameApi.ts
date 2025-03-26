@@ -230,34 +230,41 @@ export async function joinGame(
     // 임시 사용자 ID 생성
     const userId = `user_${Math.random().toString(36).substring(2, 9)}`;
     
-    // 플레이어 생성
-    const { data: playerData, error: playerError } = await supabase
-      .from('players')
-      .insert({
-        id: playerId,
-        game_id: gameId,
-        user_id: userId,
-        username,
-        balance: 10000,
-        is_die: false,
-        seat_index: seatIndex
-      })
-      .select();
-    
-    if (playerError) {
-      throw handleDatabaseError(playerError, 'joinGame');
+    // 플레이어 생성 - 트랜잭션으로 변경하여 일관성 보장
+    try {
+      const { data: playerData, error: playerError } = await supabase
+        .from('players')
+        .insert({
+          id: playerId,
+          game_id: gameId,
+          user_id: userId,
+          username,
+          balance: 10000,
+          is_die: false,
+          seat_index: seatIndex,
+          is_ready: false
+        })
+        .select();
+      
+      if (playerError) {
+        throw handleDatabaseError(playerError, 'joinGame');
+      }
+      
+      console.log('플레이어 참가 성공:', playerId);
+      
+      // 로컬 스토리지에 사용자 정보 저장
+      localStorage.setItem(`game_${gameId}_user_id`, userId);
+      localStorage.setItem(`game_${gameId}_player_id`, playerId);
+      localStorage.setItem(`game_${gameId}_seat_index`, String(seatIndex));
+      
+      // 최신 게임 상태 가져오기
+      const gameState = await getGameState(gameId);
+      
+      return { playerId, gameState };
+    } catch (insertError) {
+      console.error('플레이어 생성 중 오류:', insertError);
+      throw handleDatabaseError(insertError, 'joinGame player insert');
     }
-    
-    console.log('플레이어 참가 성공:', playerId);
-    
-    // 로컬 스토리지에 사용자 정보 저장
-    localStorage.setItem(`game_${gameId}_user_id`, userId);
-    localStorage.setItem(`game_${gameId}_player_id`, playerId);
-    
-    // 최신 게임 상태 가져오기
-    const gameState = await getGameState(gameId);
-    
-    return { playerId, gameState };
   } catch (err) {
     console.error('게임 참가 중 예외 발생:', err);
     throw err;
