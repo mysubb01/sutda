@@ -55,8 +55,32 @@ export async function getAllRooms(): Promise<Room[]> {
     };
   });
 
-  // 플레이어가 1명 이상인 방만 반환
-  return roomsWithPlayerCount.filter(room => room.current_players > 0);
+  // 플레이어가 1명 이상이며 디버그용 방이 아닌 방만 반환
+  return roomsWithPlayerCount.filter(room => {
+    // 플레이어 수 필터링
+    if (room.current_players <= 0) return false;
+    
+    // 디버그용 방 필터링
+    // 방 이름에 'debug', '디버그', '테스트' 등이 포함된 경우
+    const roomName = (room.name || '').toLowerCase();
+    if (roomName.includes('debug') || roomName.includes('디버그') || roomName.includes('test') || roomName.includes('테스트')) {
+      return false;
+    }
+    
+    // room_metadata에 is_debug 플래그가 있을 경우
+    const metadata = room.metadata || {};
+    if (metadata.is_debug === true) {
+      return false;
+    }
+    
+    // 특정 URL 경로로 접근한 방인 경우 (URL에 debug 포함)
+    const referer = metadata.referer || '';
+    if (referer.includes('/debug/')) {
+      return false;
+    }
+    
+    return true;
+  });
 }
 
 /**

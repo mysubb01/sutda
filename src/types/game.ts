@@ -40,10 +40,12 @@ export interface Player {
   cards?: number[];
   open_card?: number; // 3장 모드에서 공개된 카드
   selected_cards?: number[]; // 3장 모드에서 최종 선택한 카드
-  isDie?: boolean;
+  is_die?: boolean; // 데이터베이스 필드명과 일치하도록 isDie에서 is_die로 변경
+  bet?: number; // 현재 베팅 금액
   position?: number;
   seat_index?: number; // 테이블에서의 좌석 인덱스 (0-7)
   is_ready?: boolean; // 준비 여부
+  game_id?: string; // 속한 게임 ID
 }
 
 /**
