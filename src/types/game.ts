@@ -26,6 +26,7 @@ export interface Room {
   created_at: string;
   betting_option: 'standard' | 'step_by_step';
   current_players?: number; // 현재 방에 있는 플레이어 수
+  default_base_bet?: number; // 기본 배팅액
 }
 
 /**
@@ -46,6 +47,7 @@ export interface Player {
   seat_index?: number; // 테이블에서의 좌석 인덱스 (0-7)
   is_ready?: boolean; // 준비 여부
   game_id?: string; // 속한 게임 ID
+  is_muted?: boolean; // 음소거 여부
 }
 
 /**
