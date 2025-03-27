@@ -4,6 +4,7 @@ import { createShuffledDeck } from './deckApi';
 import { logGameStart, logGameEnd, logSystemError } from '../logService';
 import { GameState } from '@/types/game';
 import { getNextPlayerTurn } from './gameActionApi';
+import { evaluateCards, determineWinner } from '@/utils/gameLogic';
 
 /**
  * 디버그 모드용 게임 시작 함수 - 플레이어 수 제한을 무시하고 게임을 시작합니다.
@@ -35,44 +36,68 @@ export async function startDebugGame(gameId: string): Promise<void> {
     if (playersError) {
       throw handleDatabaseError(playersError, 'startDebugGame:players');
     }
+    
+    // 타입을 명시적으로 지정하여 린트 오류 방지
+    const playerCount = playersData ? playersData.length : 0;
 
     // 디버그 모드에서는 플레이어 수 제한을 검사하지 않음
     // 덱 생성 및 카드 분배
     const deck = createShuffledDeck();
-    const playerCards = {};
-    let cardIndex = 0;
     
     // 각 플레이어에게 카드 분배 (모드에 따라 2장 또는 3장)
     const cardCount = gameMode === 'triple' ? 3 : 2;
     
     for (const player of playersData) {
-      playerCards[player.id] = [];
-      
+      // 각 플레이어에게 카드 분배
+      const playerCards = [];
       for (let i = 0; i < cardCount; i++) {
-        playerCards[player.id].push(deck[cardIndex]);
-        cardIndex++;
+        playerCards.push(deck.pop()!);
       }
+      
+      // 카드 저장
+      await supabase
+        .from('players')
+        .update({ 
+          cards: playerCards,
+          is_die: false,
+          is_ready: false,
+          folded: false,
+          current_bet: baseBet,
+          has_acted: false,
+          balance: player.balance - baseBet,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', player.id);
     }
 
-    // 첫 플레이어 턴 결정 (일반적으로 첫 번째 플레이어)
-    const firstPlayerId = playersData[0]?.id;
-
-    // 트랜잭션으로 게임 상태 업데이트 및 플레이어 카드 저장
-    const { error: updateError } = await supabase.rpc('start_game', {
-      p_game_id: gameId,
-      p_first_player_id: firstPlayerId,
-      p_player_cards: playerCards,
-      p_base_bet: baseBet
-    });
-
-    if (updateError) {
-      throw handleDatabaseError(updateError, 'startDebugGame:update');
+    // 시작 플레이어 랜덤 결정
+    const startPlayerIndex = Math.floor(Math.random() * playersData.length);
+    const startPlayerId = playersData[startPlayerIndex].id;
+    
+    // 게임 상태 업데이트 (여기서 명시적으로 'playing'으로 설정)
+    const { error: updateGameError } = await supabase
+      .from('games')
+      .update({
+        status: 'playing', // 중요: 게임 상태를 'playing'으로 명시적 설정
+        current_player_id: startPlayerId,
+        current_turn: 1,
+        show_cards: false,
+        betting_value: baseBet,
+        total_pot: baseBet * playersData.length,
+        updated_at: new Date().toISOString(),
+        betting_round: 1
+      })
+      .eq('id', gameId);
+      
+    if (updateGameError) {
+      throw handleDatabaseError(updateGameError, 'startDebugGame:game update');
     }
 
-    // 게임 시작 로그 기록
-    logGameStart(gameId, playersData.length);
+    // 게임 시작 로그 기록 - 명시적 변수 사용으로 해결
+    await logGameStart(gameId, playerCount, cardCount);
+    
   } catch (error) {
-    logSystemError('startDebugGame', gameId, error);
+    await logSystemError(gameId, 'startDebugGame', error);
     throw handleGameError(error, ErrorType.INVALID_STATE, 'startDebugGame');
   }
 }
@@ -154,7 +179,7 @@ export async function startGame(gameId: string, playerId?: string): Promise<{ su
       }
       
       // 남은 카드를 예비 카드로 저장
-      const reservedCards = {};
+      const reservedCards: Record<string, number> = {};
       for (let i = 0; i < playersData.length; i++) {
         reservedCards[playersData[i].id] = deck.pop()!;
       }
@@ -172,14 +197,12 @@ export async function startGame(gameId: string, playerId?: string): Promise<{ su
     const startPlayerIndex = Math.floor(Math.random() * playersData.length);
     const startPlayerId = playersData[startPlayerIndex].id;
     
-    // 게임 상태 업데이트
+    // 게임 상태 업데이트 - 실제 DB 스키마에 존재하는 필드만 사용
     const { error: updateGameError } = await supabase
       .from('games')
       .update({
         status: 'playing',
-        current_player_id: startPlayerId,
-        current_turn: 1,
-        show_cards: false,
+        current_turn: startPlayerId, // current_player_id 대신 current_turn 사용 (데이터베이스 스키마에 맞게 수정)
         betting_value: baseBet,
         total_pot: baseBet * playersData.length,
         updated_at: new Date().toISOString(),
@@ -207,18 +230,14 @@ export async function startGame(gameId: string, playerId?: string): Promise<{ su
     }
     
     // 게임 시작 로그 기록
-    await logGameStart(gameId, playersData.map(p => p.id), {
-      playerCount: playersData.length,
-      gameMode,
-      startingPlayerId: startPlayerId
-    });
+    await logGameStart(gameId, playersData.length, gameMode === 'triple' ? 3 : 2);
     
     // 성공 결과 반환
     return { success: true };
     
   } catch (error: any) {
     console.error('게임 시작 중 오류:', error);
-    await logSystemError(gameId, 'startGame', error);
+    await logSystemError(gameId || '', 'startGame', error);
     
     // 실패 결과 반환 - 예외를 상위로 전파하는 대신 결과 객체 반환
     return { 
@@ -281,18 +300,24 @@ export async function finishGame(gameId: string): Promise<void> {
           cards.push(player.reserved_card);
         }
         
-        const { combination, value } = evaluateCards(cards);
+        const result = evaluateCards(cards);
         return {
           id: player.id,
           username: player.username,
           cards,
-          combination,
-          value
+          combination: result.rank,
+          value: result.value
         };
       });
       
       // 승자 결정
-      winnerInfo = determineWinner(playerResults);
+      const winner = determineWinner(playerResults.map(p => ({ id: p.id, cards: p.cards, is_die: false })));
+      winnerInfo = {
+        id: winner.winnerId || activePlayers[0].id,
+        username: activePlayers.find(p => p.id === (winner.winnerId || activePlayers[0].id))?.username || '',
+        combination: null,
+        value: 0
+      };
     }
 
     // 게임 업데이트: 승자 정보 및 카드 공개
@@ -324,11 +349,7 @@ export async function finishGame(gameId: string): Promise<void> {
     }
 
     // 게임 결과 로그 기록
-    await logGameEnd(gameId, winnerInfo.id, {
-      totalPot: gameData.total_pot,
-      winnerName: winnerInfo.username,
-      activePlayers: activePlayers.length
-    });
+    await logGameEnd(gameId, winnerInfo.id, winnerInfo.combination || '', gameData.total_pot);
 
   } catch (error: any) {
     console.error('게임 종료 처리 중 오류:', error);
@@ -534,11 +555,12 @@ export async function getGameState(gameId: string): Promise<GameState> {
       throw handleDatabaseError(messagesError, 'getGameState: messages');
     }
 
+    // GameState 타입에 맞게 반환 형식 변경
     return {
-      game,
-      players,
-      messages: messages || []
-    };
+      ...game,
+      players: players || [],
+      messages: messages || [] 
+    } as GameState;
   } catch (error: any) {
     console.error('게임 상태 조회 중 오류:', error);
     await logSystemError(gameId, 'getGameState', error);

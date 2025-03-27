@@ -152,15 +152,34 @@ export function logError(gameId: string, category: LogCategory, message: string,
 
 /**
  * 게임 시작 로그
+ * 플레이어 수와 게임 모드 정보를 기록
  */
-export function logGameStart(gameId: string, playerCount: number, gameMode: number) {
-  return logInfo(
-    gameId,
-    'game',
-    `게임 시작: ${playerCount}명 참가, ${gameMode}장 모드`,
-    undefined,
-    { playerCount, gameMode }
-  );
+export function logGameStart(gameId: string, playerCount: number, gameMode: number): Promise<string>;
+export function logGameStart(gameId: string, playerIds: string[], metadata: any): Promise<string>;
+export function logGameStart(gameId: string, playerInfoOrIds: number | string[], gameModeOrMetadata?: number | any): Promise<string> {
+  if (typeof playerInfoOrIds === 'number') {
+    // 기존 서명 지원 (playerCount, gameMode)
+    const playerCount = playerInfoOrIds;
+    const gameMode = gameModeOrMetadata as number;
+    return logInfo(
+      gameId,
+      'game',
+      `게임 시작: ${playerCount}명 참가, ${gameMode}장 모드`,
+      undefined,
+      { playerCount, gameMode }
+    );
+  } else {
+    // 새로운 서명 지원 (playerIds, metadata)
+    const playerIds = playerInfoOrIds;
+    const metadata = gameModeOrMetadata as any;
+    return logInfo(
+      gameId,
+      'game',
+      `게임 시작: ${playerIds.length}명 참가, ${metadata?.gameMode || ''} 모드`,
+      undefined,
+      { playerIds, ...metadata }
+    );
+  }
 }
 
 /**

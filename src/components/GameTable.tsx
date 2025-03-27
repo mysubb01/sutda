@@ -61,22 +61,35 @@ export function GameTable({
   const [selectedSeat, setSelectedSeat] = useState<number | null>(null);
   const [isJoining, setIsJoining] = useState(false);
 
-  // 게임이 시작되었는지 여부를 체크
+  // 게임이 시작되었는지 여부를 체크 - 조건문을 안에서 사용하지 않도록 수정
   useEffect(() => {
-    if (gameState?.status === 'playing' && !hasStarted) {
+    // gameState 가 없을 때 오류 방지
+    if (!gameState) return;
+
+    const isPlaying = gameState.status === 'playing';
+    if (isPlaying && !hasStarted) {
       setHasStarted(true);
     }
-  }, [gameState?.status, hasStarted]);
+  }, [gameState, hasStarted]);
   
   // 게임이 종료되었는지 여부를 별도 useEffect로 분리
   useEffect(() => {
-    if (gameState?.status === 'finished' && !showCards) {
+    // gameState 가 없을 때 오류 방지
+    if (!gameState) return;
+
+    const isFinished = gameState.status === 'finished';
+    if (isFinished && !showCards) {
       setShowCards(true);
     }
-  }, [gameState?.status, showCards]);
+  }, [gameState, showCards]);
   
-  // 현재 플레이어 찾기
-  const currentPlayer = gameState?.players.find(p => p.id === currentPlayerId);
+  // 현재 플레이어 찾기 - 오류 수정
+  const currentPlayer = useMemo(() => {
+    if (!gameState || !gameState.players || !Array.isArray(gameState.players)) {
+      return null;
+    }
+    return gameState.players.find(p => p.id === currentPlayerId);
+  }, [gameState, currentPlayerId]);
   
   // 관찰자 모드거나 게임 상태가 없을 때 로딩 화면 표시
   if (!gameState) {
@@ -91,7 +104,7 @@ export function GameTable({
   }
   
   // 게임 참가자인데 플레이어 정보가 없으면 오류 표시
-  if (!isObserver && !currentPlayer) {
+  if (!isObserver && !currentPlayer && gameState.players && gameState.players.length > 0) {
     return (
       <div className="flex items-center justify-center h-full p-8">
         <div className="text-center bg-red-900 bg-opacity-80 p-4 rounded-lg border border-red-700">
@@ -102,28 +115,34 @@ export function GameTable({
     );
   }
   
-  // 게임에 참여한 플레이어 수
-  const playerCount = gameState.players.length;
+  // 게임에 참여한 플레이어 수 (오류 방지를 위해 배열 확인)
+  const playerCount = gameState.players && Array.isArray(gameState.players) ? gameState.players.length : 0;
   const maxPlayers = 5; // 최대 5명까지 참가 가능
   
-  // 플레이어들의 화면 위치 매핑
+  // 플레이어들의 화면 위치 매핑 - 오류 수정
   const positionedPlayers = useMemo(() => {
-    if (!gameState || !gameState.players) return [];
+    // gameState가 없거나 players가 없을 경우 빈 배열 반환
+    if (!gameState || !gameState.players || !Array.isArray(gameState.players)) {
+      return [];
+    }
     
-    const currentUserId = currentPlayerId;
+    // 플레이어 목록 복사
     let playersWithPosition = [...gameState.players];
     
-    if (!playersWithPosition.length) return [];
+    // 플레이어가 없으면 빈 배열 반환
+    if (!playersWithPosition.length) {
+      return [];
+    }
 
     // 플레이어들의 실제 좌석 인덱스를 기준으로 정렬
     playersWithPosition.sort((a, b) => {
-      const seatA = a.seat_index !== undefined ? a.seat_index : 0;
-      const seatB = b.seat_index !== undefined ? b.seat_index : 0;
+      const seatA = typeof a.seat_index === 'number' ? a.seat_index : 0;
+      const seatB = typeof b.seat_index === 'number' ? b.seat_index : 0;
       return seatA - seatB;
     });
     
     // 현재 플레이어 인덱스 찾기
-    let myIndex = playersWithPosition.findIndex(p => p.id === currentUserId);
+    let myIndex = playersWithPosition.findIndex(p => p.id === currentPlayerId);
     
     const gameShowCards = gameState.show_cards || false;
     
@@ -146,7 +165,7 @@ export function GameTable({
         playerCards.forEach((card, idx) => {
           // 카드 표시 여부 결정
           const cardsVisible = gameState.status === 'finished' || gameShowCards;
-          const isMyCard = player.id === currentUserId;
+          const isMyCard = player.id === currentPlayerId;
           
           if (cardsVisible || isMyCard) {
             cardStatus.push({ status: 'open', value: String(card) });
@@ -159,7 +178,7 @@ export function GameTable({
       else if (gameState.game_mode === 3) {
         playerCards.forEach((card, idx) => {
           const cardsVisible = gameState.status === 'finished' || gameShowCards;
-          const isMyCard = player.id === currentUserId;
+          const isMyCard = player.id === currentPlayerId;
           const isOpenCard = player.open_card === card;
           
           // 첫 번째 베팅 라운드에서 오픈 카드 표시
@@ -179,7 +198,7 @@ export function GameTable({
       return {
         ...player,
         position: position, // 지정된 좌석 인덱스 사용
-        isMe: player.id === currentUserId,
+        isMe: player.id === currentPlayerId,
         isCurrentTurn: gameState.currentTurn === player.id,
         is_die: player.is_die === true,
         cards: cardStatus
@@ -187,32 +206,47 @@ export function GameTable({
     });
   }, [gameState, currentPlayerId, showCards]);
   
-  // 비어있는 자리 계산 (useMemo 훅으로 감싸기)
+  // 비어있는 자리 계산 (useMemo 훅으로 감싸기) - 오류 수정
   const emptySlots = useMemo(() => {
-    if (gameState.status !== 'waiting') return [];
+    // gameState 가 없거나 상태가 waiting이 아니면 빈 배열 반환
+    if (!gameState || gameState.status !== 'waiting' || !gameState.players || !Array.isArray(gameState.players)) {
+      return [];
+    }
     
     // 비어있는 자리 목록 계산
     return Array.from({ length: maxPlayers }, (_, i) => i)
       .filter(seatIndex => {
         // 현재 플레이어가 이미 앉아있는 자리는 빈 자리로 표시하지 않음
-        const isCurrentPlayerSeat = currentPlayer && currentPlayer.seat_index === seatIndex;
+        const isCurrentPlayerSeat = currentPlayer && typeof currentPlayer.seat_index === 'number' && currentPlayer.seat_index === seatIndex;
         // 다른 플레이어가 앉아있는 자리도 빈 자리로 표시하지 않음
-        const isOccupiedBySomeone = gameState.players.some(player => player.seat_index === seatIndex);
+        const isOccupiedBySomeone = gameState.players.some(player => 
+          typeof player.seat_index === 'number' && player.seat_index === seatIndex
+        );
         
         return !isCurrentPlayerSeat && !isOccupiedBySomeone;
       });
-  }, [gameState.players, gameState.status, maxPlayers, currentPlayer]);
+  }, [gameState, maxPlayers, currentPlayer]);
   
-  // 디버깅용 로그 - useEffect로 이동하여 렌더링 중 콘솔 출력 방지
+  // 디버깅용 로그 - useEffect로 이동하여 렌더링 중 콘솔 출력 방지 - 안전한 버전으로 수정
   useEffect(() => {
+    // 게임 상태나 플레이어 정보가 없으면 실행하지 않음
+    if (!gameState || !gameState.players || !Array.isArray(gameState.players)) {
+      return;
+    }
+    
     console.log('GameTable 정보:', {
       플레이어수: playerCount,
-      플레이어정보: gameState.players.map(p => ({ id: p.id, name: p.username, seat: p.seat_index, ready: p.is_ready })),
+      플레이어정보: gameState.players.map(p => ({ 
+        id: p.id, 
+        name: p.username, 
+        seat: p.seat_index, 
+        ready: p.is_ready 
+      })),
       빈자리: emptySlots,
       방장여부: isHost,
       준비상태: isReady
     });
-  }, [playerCount, gameState.players, emptySlots, isHost, isReady]);
+  }, [gameState, playerCount, emptySlots, isHost, isReady]);
 
   // 좌석 클릭 핸들러
   const handleSeatClick = async (seatIndex: number) => {
@@ -227,10 +261,10 @@ export function GameTable({
       return;
     }
     
-    // 게임이 대기 상태가 아니면 좌석 변경 불가
-    if (gameState.status !== 'waiting') {
-      console.log('[handleSeatClick] Cannot change seats - game is not in waiting state');
-      toast.error('게임이 시작되면 좌석을 변경할 수 없습니다');
+    // 게임이 대기 상태가 아니거나 카드가 이미 배분된 경우 좌석 변경 불가
+    if (gameState.status !== 'waiting' || gameState.players.some(p => p.cards && p.cards.length > 0)) {
+      console.log('[handleSeatClick] Cannot change seats - game is not in waiting state or cards are already dealt');
+      toast.error('게임이 시작되거나 카드가 배분된 후에는 좌석을 변경할 수 없습니다');
       return;
     }
 
@@ -474,7 +508,9 @@ export function GameTable({
                   {gameState.game_mode === 3 ? '3장 게임' : '2장 게임'} | 총 배팅 금액: {gameState?.bettingValue?.toLocaleString() ?? 0} 포인트
                 </p>
               </div>
-              {gameState.status === 'waiting' && !isObserver && isHost && (
+              {/* 게임 시작 버튼 - 게임이 대기 상태이고 카드가 배분되지 않은 상태에서만 표시 */}
+              {(gameState.status === 'waiting' && !gameState.players.some(p => p.cards && p.cards.length > 0)) && 
+               !isObserver && isHost && (
                 <div className="mt-4">
                   {onStartGame && (
                     <button
@@ -574,20 +610,56 @@ export function GameTable({
               />
             )}
             
-            {/* 게임 상태 메시지 (대기 중일 때) */}
-            {gameState.status === 'waiting' && (
-              <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-center z-30">
-                <div className="px-4 py-2 bg-black bg-opacity-70 rounded-lg border border-yellow-600 shadow-lg max-w-sm w-full">
-                  <h2 className="text-xl font-bold text-yellow-400 mb-2">게임 대기 중</h2>
-                  <p className="text-white text-sm mb-3">
-                    현재 {gameState.players.length}명의 플레이어가 참가했습니다. 게임을 시작하려면 2명 이상의 플레이어가 필요합니다.
-                  </p>
-                </div>
-              </div>
-            )}
+            {/* 게임 상태 메시지 - 게임 상태에 따라 다른 메시지 표시 */}
+            {(() => {
+              // 게임이 대기 상태이고 카드가 배분되지 않은 경우
+              if (gameState.status === 'waiting' && !gameState.players.some(p => p.cards && p.cards.length > 0)) {
+                return (
+                  <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-center z-30">
+                    <div className="px-4 py-2 bg-black bg-opacity-70 rounded-lg border border-yellow-600 shadow-lg max-w-sm w-full">
+                      <h2 className="text-xl font-bold text-yellow-400 mb-2">게임 대기 중</h2>
+                      <p className="text-white text-sm mb-3">
+                        현재 {gameState.players.length}명의 플레이어가 참가했습니다.
+                        {gameState.players.length >= 2 ? 
+                          ' 게임을 시작할 준비가 되었습니다.' : 
+                          ' 게임을 시작하려면 2명 이상의 플레이어가 필요합니다.'}
+                      </p>
+                    </div>
+                  </div>
+                );
+              } 
+              // 상태는 'waiting'이지만 카드가 배분된 경우 (실제 진행 중)
+              else if (gameState.status === 'waiting' && gameState.players.some(p => p.cards && p.cards.length > 0)) {
+                return (
+                  <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-center z-30">
+                    <div className="px-4 py-2 bg-black bg-opacity-70 rounded-lg border border-yellow-600 shadow-lg max-w-sm w-full">
+                      <h2 className="text-xl font-bold text-yellow-400 mb-2">게임 진행 중</h2>
+                      <p className="text-white text-sm mb-3">
+                        카드가 배분되었습니다. 참가한 플레이어들의 액션을 기다리는 중입니다.
+                      </p>
+                    </div>
+                  </div>
+                );
+              }
+              // 게임이 진행 중(이미 진행중인 경우)
+              else if (gameState.status === 'playing') {
+                return (
+                  <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-center z-30">
+                    <div className="px-4 py-2 bg-black bg-opacity-70 rounded-lg border border-yellow-600 shadow-lg max-w-sm w-full">
+                      <h2 className="text-xl font-bold text-yellow-400 mb-2">게임 진행 중</h2>
+                      <p className="text-white text-sm mb-3">
+                        진행 중인 상태입니다. {gameState.currentTurn && '현재 플레이어의 턴입니다.'}
+                      </p>
+                    </div>
+                  </div>
+                );
+              }
+              // 기본 경우는 null 반환 (표시 없음)
+              return null;
+            })()}
             
-            {/* 빈 자리 (게임 대기 중일 때만 표시, 자신의 자리와 겹치지 않게) */}
-            {gameState.status === 'waiting' && emptySlots.map((position) => (
+            {/* 빈 자리 - 게임이 대기 상태이고 카드가 배분되지 않은 경우에만 표시 */}
+            {(gameState.status === 'waiting' && !gameState.players.some(p => p.cards && p.cards.length > 0)) && emptySlots.map((position) => (
               <div
                 key={`empty-${position}`}
                 className={cn(
