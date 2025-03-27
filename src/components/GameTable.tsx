@@ -115,6 +115,13 @@ export function GameTable({
     
     if (!playersWithPosition.length) return [];
 
+    // 플레이어들의 실제 좌석 인덱스를 기준으로 정렬
+    playersWithPosition.sort((a, b) => {
+      const seatA = a.seat_index !== undefined ? a.seat_index : 0;
+      const seatB = b.seat_index !== undefined ? b.seat_index : 0;
+      return seatA - seatB;
+    });
+    
     // 현재 플레이어 인덱스 찾기
     let myIndex = playersWithPosition.findIndex(p => p.id === currentUserId);
     
@@ -186,8 +193,15 @@ export function GameTable({
     
     // 비어있는 자리 목록 계산
     return Array.from({ length: maxPlayers }, (_, i) => i)
-      .filter(seatIndex => !gameState.players.some(player => player.seat_index === seatIndex));
-  }, [gameState.players, gameState.status, maxPlayers]);
+      .filter(seatIndex => {
+        // 현재 플레이어가 이미 앉아있는 자리는 빈 자리로 표시하지 않음
+        const isCurrentPlayerSeat = currentPlayer && currentPlayer.seat_index === seatIndex;
+        // 다른 플레이어가 앉아있는 자리도 빈 자리로 표시하지 않음
+        const isOccupiedBySomeone = gameState.players.some(player => player.seat_index === seatIndex);
+        
+        return !isCurrentPlayerSeat && !isOccupiedBySomeone;
+      });
+  }, [gameState.players, gameState.status, maxPlayers, currentPlayer]);
   
   // 디버깅용 로그 - useEffect로 이동하여 렌더링 중 콘솔 출력 방지
   useEffect(() => {
@@ -396,7 +410,11 @@ export function GameTable({
     setIsNicknameDialogOpen(false);
   };
 
-  const handleNicknameSubmit = async () => {
+  // 닉네임 입력 후 시행되는 제출 함수
+  const handleNicknameSubmit = async (e: React.FormEvent) => {
+    // 기본 폼 제출 동작 방지
+    e.preventDefault();
+    
     if (!onAddPlayer || selectedSeat === null || !nickname.trim()) {
       toast.error('닉네임을 입력해주세요. 좌석 선택이 너무 오래 걸렸습니다. 새로 고침 후 다시 시도해주세요.');
       setIsNicknameDialogOpen(false);
@@ -404,16 +422,20 @@ export function GameTable({
     }
 
     try {
+      // 로깅 및 데이터 처리
       console.log(`[GameTable] Observer submitting nickname ${nickname} for seat ${selectedSeat}`);
-      await onAddPlayer(selectedSeat, nickname);
+      const tempSeat = selectedSeat; // 임시 변수에 저장하여 비동기 호출 중 상태 변화에 영향받지 않도록 방지
+      const tempName = nickname;
       
-      // 게임 상태 업데이트는 client.tsx에서 담당하므로 여기서는 최소한의 작업만 수행
+      // 닉네임 대화창 및 입력값 초기화
       setIsNicknameDialogOpen(false);
       setNickname('');
+      
+      // 비동기 호출 수행 (상태 초기화 후 수행하여 랜더링 중 상태 변경 방지)
+      await onAddPlayer(tempSeat, tempName);
     } catch (error) {
       console.error('[GameTable] Error joining game:', error);
       toast.error('게임 참가 중 오류가 발생했습니다.');
-      setIsNicknameDialogOpen(false);
     }
   };
 
@@ -496,15 +518,24 @@ export function GameTable({
               )}
             </div>
             
-            {/* 플레이어 배치 */}
+            {/* 플레이어 배치 - 좌석 인덱스 기준으로 균등하게 배치 */}
             {positionedPlayers.map((player) => (
-              <TablePlayer
-                key={player.id}
-                player={player}
-                isReady={player.is_ready}
-                mode={gameState.game_mode || 2}
-                bettingRound={gameState.betting_round || 1}
-              />
+              <div
+                key={`player-wrapper-${player.id}`}
+                className={cn(
+                  'absolute',
+                  player.isMe ? 'z-30' : 'z-20', // isMe 속성 사용
+                  getEmptySlotStyles(player.seat_index !== undefined ? player.seat_index : 0)
+                )}
+              >
+                <TablePlayer
+                  key={player.id}
+                  player={player}
+                  isReady={player.is_ready}
+                  mode={gameState.game_mode || 2}
+                  bettingRound={gameState.betting_round || 1}
+                />
+              </div>
             ))}
             
             {/* 배팅 타이머 - 게임 중이고 현재 턴인 플레이어가 있을 때만 표시 */}
@@ -555,7 +586,7 @@ export function GameTable({
               </div>
             )}
             
-            {/* 빈 자리 (게임 대기 중일 때만 표시) */}
+            {/* 빈 자리 (게임 대기 중일 때만 표시, 자신의 자리와 겹치지 않게) */}
             {gameState.status === 'waiting' && emptySlots.map((position) => (
               <div
                 key={`empty-${position}`}
@@ -633,36 +664,42 @@ export function GameTable({
                   <h2 className="text-xl font-bold text-yellow-400 mb-4">닉네임 입력</h2>
                   <p className="mb-4 text-gray-300">닉네임을 입력하여 게임에 참가하세요.</p>
                   
-                  <div className="mb-6">
-                    <label className="block text-sm font-medium text-gray-300 mb-1">닉네임</label>
-                    <input 
-                      type="text" 
-                      value={nickname} 
-                      onChange={(e) => setNickname(e.target.value)} 
-                      placeholder="닉네임을 입력하세요"
-                      className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700 focus:border-yellow-500 focus:outline-none"
-                      autoFocus
-                    />
-                  </div>
-                  
-                  <div className="flex justify-end space-x-3">
-                    <button 
-                      onClick={() => setIsNicknameDialogOpen(false)} 
-                      className="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-white font-medium"
-                    >
-                      취소
-                    </button>
-                    <button 
-                      onClick={handleNicknameSubmit} 
-                      disabled={isJoining || !nickname.trim()}
-                      className={`px-4 py-2 rounded font-medium ${
-                        isJoining || !nickname.trim()
-                          ? 'bg-gray-600 cursor-not-allowed text-gray-400' 
-                          : 'bg-yellow-600 hover:bg-yellow-700 text-white'}`}
-                    >
-                      {isJoining ? '참가 중...' : '참가하기'}
-                    </button>
-                  </div>
+                  <form onSubmit={handleNicknameSubmit}>
+                    <div className="mb-6">
+                      <label className="block text-sm font-medium text-gray-300 mb-1">닉네임</label>
+                      <input 
+                        type="text" 
+                        value={nickname} 
+                        onChange={(e) => setNickname(e.target.value)} 
+                        placeholder="닉네임을 입력하세요"
+                        className="w-full p-3 rounded bg-gray-800 text-white border border-gray-700 focus:border-yellow-500 focus:outline-none"
+                        autoFocus
+                      />
+                    </div>
+                    
+                    <div className="flex justify-end space-x-3">
+                      <button 
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          setIsNicknameDialogOpen(false);
+                        }} 
+                        className="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-white font-medium"
+                      >
+                        취소
+                      </button>
+                      <button 
+                        type="submit"
+                        disabled={isJoining || !nickname.trim()}
+                        className={`px-4 py-2 rounded font-medium ${
+                          isJoining || !nickname.trim()
+                            ? 'bg-gray-600 cursor-not-allowed text-gray-400' 
+                            : 'bg-yellow-600 hover:bg-yellow-700 text-white'}`}
+                      >
+                        {isJoining ? '참가 중...' : '참가하기'}
+                      </button>
+                    </div>
+                  </form>
                 </div>
               </div>
             )}
@@ -682,19 +719,32 @@ export function GameTable({
   );
 }
 
+/**
+ * 테이블 주변에 균등하게 좌석을 배치하는 스타일을 계산하는 함수
+ * 좌석은 테이블 원 주변에 8개 좌석까지 배치 가능
+ * @param position 좌석 인덱스 (0-7)
+ * @returns 해당 위치에 대한 tailwind 클래스
+ */
 function getEmptySlotStyles(position: number): string {
-  switch (position % 5) {
+  // 5개 플레이어를 기준으로 배치 수정
+  // 5개 좌석만 사용하도록 균등하게 배치 (시계 방향으로 배치)
+  switch (position % 5) { // 최대 5명으로 제한하여 위치 계산
+    // 하단 (6시 방향)
     case 0: 
-      return 'bottom-[8%] left-1/2 -translate-x-1/2';
+      return 'bottom-[10%] left-1/2 -translate-x-1/2';
+    // 좌하단 (8시 방향)
     case 1: 
-      return 'bottom-[25%] right-[15%]';
+      return 'bottom-[25%] left-[20%]';
+    // 좌상단 (10시 방향)
     case 2: 
-      return 'top-[25%] right-[15%]';
+      return 'top-[25%] left-[20%]';
+    // 상단 (12시 방향)
     case 3: 
-      return 'top-[8%] left-1/2 -translate-x-1/2';
+      return 'top-[10%] left-1/2 -translate-x-1/2';
+    // 우상단 (2시 방향)
     case 4: 
-      return 'top-[25%] left-[15%]';
+      return 'top-[25%] right-[20%]';
     default:
-      return 'bottom-[8%] left-1/2 -translate-x-1/2';
+      return 'bottom-[10%] left-1/2 -translate-x-1/2';
   }
 }
