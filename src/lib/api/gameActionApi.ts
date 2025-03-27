@@ -439,33 +439,20 @@ export async function handleBettingTimeout(
  */
 export async function isRoomOwner(gameId: string, playerId: string): Promise<boolean> {
   try {
-    // 게임 정보 조회
-    const { data: game, error: gameError } = await supabase
-      .from('games')
-      .select('room_id')
-      .eq('id', gameId)
-      .single();
-    
-    if (gameError || !game) {
-      console.error('[isRoomOwner] Error retrieving game:', gameError);
+    // 게임의 플레이어 정보를 시간순으로 조회
+    const { data: players, error } = await supabase
+      .from('players')
+      .select('id, created_at')
+      .eq('game_id', gameId)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.error('[isRoomOwner] Error retrieving players:', error);
       return false;
     }
     
-    // 방 정보 조회
-    const { data: room, error: roomError } = await supabase
-      .from('rooms')
-      .select('owner_id')
-      .eq('id', game.room_id)
-      .single();
-    
-    if (roomError || !room) {
-      console.error('[isRoomOwner] Error retrieving room:', roomError);
-      return false;
-    }
-    
-    // 플레이어가 방장인지 확인
-    return room.owner_id === playerId;
-    
+    // 가장 먼저 생성된 플레이어가 방장
+    return players.length > 0 && players[0].id === playerId;
   } catch (error) {
     console.error('[isRoomOwner] Error:', error);
     return false;

@@ -65,10 +65,15 @@ export function GameTable({
   useEffect(() => {
     if (gameState?.status === 'playing' && !hasStarted) {
       setHasStarted(true);
-    } else if (gameState?.status === 'finished' && !showCards) {
+    }
+  }, [gameState?.status, hasStarted]);
+  
+  // 게임이 종료되었는지 여부를 별도 useEffect로 분리
+  useEffect(() => {
+    if (gameState?.status === 'finished' && !showCards) {
       setShowCards(true);
     }
-  }, [gameState?.status, hasStarted, showCards]);
+  }, [gameState?.status, showCards]);
   
   // 현재 플레이어 찾기
   const currentPlayer = gameState?.players.find(p => p.id === currentPlayerId);
@@ -115,9 +120,15 @@ export function GameTable({
     
     const gameShowCards = gameState.show_cards || false;
     
-    return playersWithPosition.map((player, index) => {
-      // 상대적 위치 계산
-      let relativePosition = myIndex === -1 ? index : (index - myIndex + playersWithPosition.length) % playersWithPosition.length;
+    return playersWithPosition.map((player) => {
+      // 지정된 좌석 인덱스 사용
+      let position = player.seat_index;
+      
+      // 좌석 인덱스가 없는 경우 기본값 설정
+      if (position === undefined || position === null) {
+        console.warn(`[플레이어 위치 계산] 플레이어 ${player.id}의 좌석 인덱스가 없음`);
+        position = 0;
+      }
       
       // 카드 상태 계산
       const playerCards = player.cards || [];
@@ -160,7 +171,7 @@ export function GameTable({
       // 플레이어 데이터 반환
       return {
         ...player,
-        position: relativePosition,
+        position: position, // 지정된 좌석 인덱스 사용
         isMe: player.id === currentUserId,
         isCurrentTurn: gameState.currentTurn === player.id,
         is_die: player.is_die === true,
@@ -178,14 +189,16 @@ export function GameTable({
       .filter(seatIndex => !gameState.players.some(player => player.seat_index === seatIndex));
   }, [gameState.players, gameState.status, maxPlayers]);
   
-  // 디버깅용 로그
-  console.log('GameTable 정보:', {
-    플레이어수: playerCount,
-    플레이어정보: gameState.players.map(p => ({ id: p.id, name: p.username, seat: p.seat_index, ready: p.is_ready })),
-    빈자리: emptySlots,
-    방장여부: isHost,
-    준비상태: isReady
-  });
+  // 디버깅용 로그 - useEffect로 이동하여 렌더링 중 콘솔 출력 방지
+  useEffect(() => {
+    console.log('GameTable 정보:', {
+      플레이어수: playerCount,
+      플레이어정보: gameState.players.map(p => ({ id: p.id, name: p.username, seat: p.seat_index, ready: p.is_ready })),
+      빈자리: emptySlots,
+      방장여부: isHost,
+      준비상태: isReady
+    });
+  }, [playerCount, gameState.players, emptySlots, isHost, isReady]);
 
   // 좌석 클릭 핸들러
   const handleSeatClick = async (seatIndex: number) => {
@@ -444,9 +457,9 @@ export function GameTable({
                   {onStartGame && (
                     <button
                       onClick={onStartGame}
-                      disabled={isStartingGame || !canStartGame.canStart}
-                      className={`px-4 py-2 rounded font-medium ${isStartingGame || !canStartGame.canStart ? 'bg-gray-600 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
-                      title={canStartGame.canStart ? '게임 시작' : canStartGame.message}
+                      disabled={isStartingGame || !canStartGame?.canStart}
+                      className={`px-4 py-2 rounded font-medium ${isStartingGame || !canStartGame?.canStart ? 'bg-gray-600 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
+                      title={canStartGame?.canStart ? '게임 시작' : canStartGame?.message || '게임을 시작할 수 없습니다'}
                     >
                       {isStartingGame ? '시작 중...' : '게임 시작'}
                     </button>
@@ -456,7 +469,9 @@ export function GameTable({
               {gameState.status === 'waiting' && !isObserver && !isHost && onToggleReady && (
                 <div className="mt-4">
                   <button
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.preventDefault();
+                      // 이벤트 핸들러에서 상태 업데이트를 통해 상태를 추적하지 말고 직접 함수 호출
                       if (!isReady && currentPlayer && currentPlayer.balance < (gameState?.baseBet ?? 0)) {
                         toast.error(`기본 배팅 금액이 부족합니다. 기본 배팅 금액: ${(gameState?.baseBet ?? 0).toLocaleString()}원`);
                         return;

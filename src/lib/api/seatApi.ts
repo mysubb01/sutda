@@ -17,6 +17,11 @@ export async function isSeatOccupied(
   console.log(`[isSeatOccupied] Checking seat ${seatIndex} in game ${gameId}${currentPlayerId ? `, excluding player ${currentPlayerId}` : ''}`);
   
   try {
+    // gameId 유효성 검증
+    if (!gameId) {
+      console.error('[isSeatOccupied] Invalid game ID: empty string');
+      return false; // 게임 ID가 없으면 좌석이 점유되지 않은 것으로 간주
+    }
     // 게임의 모든 플레이어 중 해당 좌석 번호를 가진 플레이어 찾기
     const { data: existingSeat, error } = await supabase
       .from('players')
@@ -130,6 +135,7 @@ export async function updateSeat(
     // 좌석 점유 여부 확인
     let isOccupied = false;
     if (gameId) {
+      console.log(`[updateSeat] Checking if seat ${seatIndex} is occupied in game ${gameId} by any player other than ${playerId}`);
       isOccupied = await isSeatOccupied(seatIndex, gameId, playerId);
     } else if (roomId) {
       // 방에서 좌석 점유 확인 로직
@@ -149,7 +155,11 @@ export async function updateSeat(
     
     if (isOccupied) {
       console.error(`[updateSeat] Seat ${seatIndex} is already occupied`);
-      return false;
+      throw handleGameError(
+        new Error(`좌석 ${seatIndex}은 이미 다른 플레이어가 사용 중입니다`),
+        ErrorType.INVALID_STATE,
+        '이미 다른 플레이어가 사용 중인 좌석입니다'
+      );
     }
     
     // 데이터베이스 업데이트
