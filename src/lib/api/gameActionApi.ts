@@ -87,9 +87,11 @@ export async function startGame(
           cards: playerCards[i],
           is_playing: true,
           is_ready: false,
-          chips: 1000, // 초기 칩 지급
+          balance: 1000, // 초기 칩 지급 (chips -> balance)
           current_bet: 0,
-          folded: false
+          is_die: false, // folded -> is_die
+          last_heartbeat: new Date().toISOString(), // 추가된 필드
+          has_acted: false // 추가된 필드
         })
         .eq('id', readyPlayers[i].id);
       
@@ -102,17 +104,23 @@ export async function startGame(
     const firstPlayerId = readyPlayers.length > 0 ? readyPlayers[0].id : null;
     
     // 게임 상태 업데이트
+    // 베팅 종료 시간 설정
+    const bettingEndTime = new Date();
+    bettingEndTime.setSeconds(bettingEndTime.getSeconds() + 30); // 30초 제한시간
+    
     const { data: updatedGame, error: updateGameError } = await supabase
       .from('games')
       .update({
         status: GameStatus.PLAYING,
-        current_player_id: firstPlayerId,
+        current_player_id: firstPlayerId, // 프론트엔드의 실제 사용에 맞춰 current_player_id 사용
         current_bet_amount: 0,
-        pot: 0,
-        round: 1,
+        pot: 0, // 프론트엔드와 호환성 위해 pot 사용
+        round: 1, // 프론트엔드와 호환성 위해 round 사용 
         deck: deck,
         last_action: '게임이 시작되었습니다',
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
+        betting_end_time: bettingEndTime.toISOString(), // 추가된 필드 유지
+        mode: game.room?.mode || 2 // 프론트엔드와 호환성 위해 mode 사용
       })
       .eq('id', gameId)
       .select('*, room:rooms(*)')
@@ -558,45 +566,54 @@ function transformGameState(gameData: any): GameState {
     room_id: gameData.room_id,
     room_name: roomName,
     status: gameData.status,
-    totalPot: gameData.pot || 0,
+    totalPot: gameData.pot || 0, // 프론트엔드와 호환성 위해 pot 사용
     bettingValue: gameData.current_bet_amount || 0,
-    currentTurn: gameData.current_player_id,
+    currentTurn: gameData.current_player_id || null, // 프론트엔드 호환성 위해 current_player_id 사용
     lastAction: gameData.last_action,
     winner: null,
     players: [], // 플레이어 정보는 별도로 로드
-    betting_round: gameData.round || 1,
-    game_mode: gameData.mode as GameMode || 2
+    betting_round: gameData.round || 1, // 프론트엔드와 호환성 위해 round 사용
+    game_mode: gameData.mode || 2, // 프론트엔드와 호환성 위해 mode 사용
+    betting_end_time: gameData.betting_end_time || null, // 추가된 필드 유지
+    cardSelectionTime: gameData.card_selection_time || null // 추가된 필드
   };
 }
 
-// 필요한 외부 함수 임시 구현 (추후 적절한 모듈에서 import 해야 함)
-export async function getNextPlayerTurn(gameId: string, currentPlayerId: string): Promise<string> {
+// 다음 플레이어 턴 참조
+/**
+ * 현재 플레이어 다음 턴을 가질 플레이어 ID를 반환
+ * 
+ * @param gameId 게임 ID
+ * @param currentPlayerId 현재 플레이어 ID
+ * @returns 다음 플레이어 ID 또는 null
+ */
+export async function getNextPlayerTurn(gameId: string, currentPlayerId: string): Promise<string | null> {
   try {
     // 현재 게임의 활성 플레이어 목록 조회
     const { data: players, error } = await supabase
       .from('players')
-      .select('id, seat_index, folded, chips')
+      .select('id, seat_index, is_die, balance')
       .eq('game_id', gameId)
       .eq('is_playing', true)
       .order('seat_index', { ascending: true });
     
     if (error || !players || players.length === 0) {
       console.error('[getNextPlayerTurn] Error retrieving players:', error);
-      return currentPlayerId;
+      return null;
     }
     
-    // 폴드하지 않고 칩이 있는 플레이어만 필터링
-    const activePlayers = players.filter(p => !p.folded && p.chips > 0);
+    // 다이하지 않고 잔액이 있는 플레이어만 필터링
+    const activePlayers = players.filter(p => !p.is_die && p.balance > 0);
     
     if (activePlayers.length <= 1) {
-      return currentPlayerId;
+      return null; // 한 명만 남았으면 다음 플레이어가 없음
     }
     
     // 현재 플레이어의 인덱스 찾기
     const currentIndex = activePlayers.findIndex(p => p.id === currentPlayerId);
     
     if (currentIndex === -1) {
-      return activePlayers[0].id;
+      return activePlayers[0].id; // 현재 플레이어가 목록에 없으면 첫 번째 활성 플레이어
     }
     
     // 다음 플레이어 계산 (순환)
@@ -605,7 +622,7 @@ export async function getNextPlayerTurn(gameId: string, currentPlayerId: string)
     
   } catch (error) {
     console.error('[getNextPlayerTurn] Error:', error);
-    return currentPlayerId;
+    return null; // 오류 발생 시 null 반환
   }
 }
 

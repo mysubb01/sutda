@@ -61,7 +61,6 @@ export async function startDebugGame(gameId: string): Promise<void> {
           cards: playerCards,
           is_die: false,
           is_ready: false,
-          folded: false,
           current_bet: baseBet,
           has_acted: false,
           balance: player.balance - baseBet,
@@ -80,12 +79,11 @@ export async function startDebugGame(gameId: string): Promise<void> {
       .update({
         status: 'playing', // 중요: 게임 상태를 'playing'으로 명시적 설정
         current_player_id: startPlayerId,
-        current_turn: 1,
         show_cards: false,
-        betting_value: baseBet,
-        total_pot: baseBet * playersData.length,
+        current_bet_amount: baseBet,
+        pot: baseBet * playersData.length,
         updated_at: new Date().toISOString(),
-        betting_round: 1
+        round: 1
       })
       .eq('id', gameId);
       
@@ -202,11 +200,11 @@ export async function startGame(gameId: string, playerId?: string): Promise<{ su
       .from('games')
       .update({
         status: 'playing',
-        current_turn: startPlayerId, // current_player_id 대신 current_turn 사용 (데이터베이스 스키마에 맞게 수정)
-        betting_value: baseBet,
-        total_pot: baseBet * playersData.length,
+        current_player_id: startPlayerId, // 프론트엔드 호환성 위해 current_player_id 사용
+        current_bet_amount: baseBet, // betting_value -> current_bet_amount
+        pot: baseBet * playersData.length, // total_pot -> pot
         updated_at: new Date().toISOString(),
-        betting_round: 1
+        round: 1 // betting_round -> round
       })
       .eq('id', gameId);
       
@@ -220,7 +218,7 @@ export async function startGame(gameId: string, playerId?: string): Promise<{ su
         .from('players')
         .update({
           is_ready: false,
-          folded: false,
+          is_die: false, // folded -> is_die
           current_bet: baseBet,
           has_acted: false,
           balance: player.balance - baseBet,
@@ -266,9 +264,9 @@ export async function finishGame(gameId: string): Promise<void> {
     // 활성 플레이어 조회 (폴드하지 않은 플레이어)
     const { data: activePlayers, error: playerError } = await supabase
       .from('players')
-      .select('id, username, cards, folded, balance, current_bet, reserved_card')
+      .select('id, username, cards, is_die, balance, current_bet, reserved_card')
       .eq('game_id', gameId)
-      .eq('folded', false);
+      .eq('is_die', false);
 
     if (playerError) {
       throw handleDatabaseError(playerError, 'finishGame: players');
@@ -339,7 +337,7 @@ export async function finishGame(gameId: string): Promise<void> {
     const { error: updateWinnerError } = await supabase
       .from('players')
       .update({
-        balance: activePlayers.find(p => p.id === winnerInfo.id)!.balance + gameData.total_pot,
+        balance: activePlayers.find(p => p.id === winnerInfo.id)!.balance + gameData.pot,
         updated_at: new Date().toISOString()
       })
       .eq('id', winnerInfo.id);
@@ -349,7 +347,7 @@ export async function finishGame(gameId: string): Promise<void> {
     }
 
     // 게임 결과 로그 기록
-    await logGameEnd(gameId, winnerInfo.id, winnerInfo.combination || '', gameData.total_pot);
+    await logGameEnd(gameId, winnerInfo.id, winnerInfo.combination || '', gameData.pot);
 
   } catch (error: any) {
     console.error('게임 종료 처리 중 오류:', error);
@@ -390,12 +388,11 @@ export async function handleRegame(gameId: string): Promise<void> {
       .update({
         status: 'waiting',
         current_player_id: null,
-        current_turn: null,
         show_cards: false,
-        betting_value: 0,
-        total_pot: 0,
+        current_bet_amount: 0, // betting_value -> current_bet_amount
+        pot: 0, // total_pot -> pot
         updated_at: new Date().toISOString(),
-        betting_round: 1
+        round: 1 // betting_round -> round
       })
       .eq('id', gameId);
 

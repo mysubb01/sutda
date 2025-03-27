@@ -46,11 +46,14 @@ export async function createGame(
     const { error: playerError } = await supabase.from("players").insert({
       id: playerId,
       game_id: gameId,
-      user_id: uuidv4(), // 임시 사용자 ID 생성
+      user_id: playerId, // 생성된 playerId 사용
       username: username,
-      balance: 1000, // 기본 잔액
+      balance: 10000, // DB 기본값 사용
+      is_die: false, // 누락 필드 추가
+      is_ready: false, // 누락 필드 추가
       created_at: timestamp,
       updated_at: timestamp,
+      last_heartbeat: timestamp, // 누락 필드 추가
       seat_index: 0, // 기본 좌석 인덱스 0
     });
 
@@ -180,10 +183,13 @@ export async function joinGame(
     const { error: insertError } = await supabase.from("players").insert({
       id: playerId,
       game_id: gameId,
-      user_id: uuidv4(),
+      user_id: playerId, // 생성된 playerId 사용
       username: username,
-      balance: 1000,
+      balance: 10000, // DB 기본값 사용
+      is_die: false, // 누락 필드 추가
       created_at: timestamp,
+      updated_at: timestamp, // updated_at 추가
+      last_heartbeat: timestamp, // 누락 필드 추가
       seat_index: finalSeatIndex,
       is_ready: false,
     });
@@ -203,11 +209,11 @@ export async function joinGame(
 
     // 게임 상태 조회
     const gameState = await getGameState(gameId);
-    
+
     return {
       playerId,
       gameState,
-      rejoined: false
+      rejoined: false,
     };
   } catch (error: any) {
     console.error(`[joinGame] Error joining game: ${gameId}`, error);

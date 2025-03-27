@@ -197,14 +197,58 @@ export function logGameEnd(gameId: string, winnerId: string, winningRank: string
 
 /**
  * 베팅 액션 로그
+ * 
+ * @param gameId 게임 ID
+ * @param playerId 플레이어 ID
+ * @param action 베팅 액션
+ * @param data 베팅 데이터 또는 메시지
+ * @param nextPlayer 다음 플레이어 ID
  */
-export function logBettingAction(gameId: string, playerId: string, action: string, amount: number, currentPot: number) {
+export function logBettingAction(
+  gameId: string, 
+  playerId: string, 
+  action: string, 
+  data: any, 
+  nextPlayer?: any
+) {
+  // 이전 형식 지원 (하위 호환성)
+  if (typeof data === 'number') {
+    const amount = data;
+    const currentPot = arguments[4] as number;
+    return logInfo(
+      gameId,
+      'betting',
+      `베팅 액션: ${playerId}의 ${action} ${amount}원, 현재 총 ${currentPot}원`,
+      playerId,
+      { action, amount, currentPot, nextPlayer }
+    );
+  }
+  
+  // 새 형식 지원 (data 객체 사용)
+  let message = `베팅 액션: ${playerId}의 ${action}`;
+  
+  if (data.amount !== undefined) {
+    message += ` ${data.amount}원`;
+  }
+  
+  if (data.totalBet !== undefined) {
+    message += `, 총 베팅 ${data.totalBet}원`;
+  }
+  
+  if (data.balance !== undefined) {
+    message += `, 잔액 ${data.balance}원`;
+  }
+  
+  if (data.message) {
+    message = data.message; // 메시지가 있으면 그것을 사용
+  }
+  
   return logInfo(
     gameId,
     'betting',
-    `베팅 액션: ${playerId}의 ${action} ${amount}원, 현재 총 ${currentPot}원`,
+    message,
     playerId,
-    { action, amount, currentPot }
+    { ...data, action, nextPlayer }
   );
 }
 

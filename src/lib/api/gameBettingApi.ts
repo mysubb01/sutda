@@ -2,7 +2,7 @@ import { supabase } from '../supabaseClient';
 import { handleDatabaseError, handleGameError, handleResourceNotFoundError, ErrorType } from '../utils/errorHandlers';
 import { BetActionType, Player } from '@/types/game';
 import { getNextPlayerTurn } from './gameActionApi';
-import { logBettingAction, logSystemError } from '../logService';
+import { logBettingAction, logSystemError, logInfo } from '../logService';
 
 /**
  * 베팅
@@ -16,8 +16,9 @@ export async function placeBet(
   try {
     // betAction 함수를 호출하여 베팅 처리
     await betAction(gameId, playerId, actionType, amount || 0);
-  } catch (error) {
-    console.error('베팅 중 오류:', error);
+  } catch (error: unknown) {
+    const errorMsg = error instanceof Error ? error.message : '알 수 없는 오류';
+    console.error('베팅 중 오류:', errorMsg);
     throw error;
   }
 }
@@ -26,7 +27,8 @@ export async function placeBet(
  * 모든 플레이어가 동일한 금액을 배팅했는지 확인
  */
 export async function checkAllPlayersMatchedBet(gameId: string, players: Player[]): Promise<boolean> {
-  const activePlayers = players.filter(p => !p.folded);
+  // 프론트엔드 호환성을 위해 is_die 사용
+  const activePlayers = players.filter(p => !p.is_die);
   
   if (activePlayers.length <= 1) {
     return true; // 한 명만 남으면 자동으로 매치됨
@@ -39,6 +41,7 @@ export async function checkAllPlayersMatchedBet(gameId: string, players: Player[
   const allMatched = activePlayers.every(p => p.current_bet === maxBet);
   
   // 모든 활성 플레이어가 액션을 취했는지 확인
+  // has_acted 필드는 DB에 추가됨
   const allActed = activePlayers.every(p => p.has_acted);
   
   return allMatched && allActed;
@@ -71,12 +74,13 @@ export async function finishBettingRound(gameId: string): Promise<void> {
     }
     
     // 활성 플레이어 수 확인
-    const activePlayers = players.filter(p => !p.folded);
+    const activePlayers = players.filter(p => !p.is_die);
     
     if (activePlayers.length <= 1) {
       // 한 명만 남았으면 게임 종료
       await logBettingAction(gameId, 'system', 'end_round', {
-        message: '한 명만 남아 게임을 종료합니다.'
+        message: '한 명만 남아 게임을 종료합니다.',
+        nextPlayer: null
       });
       return;
     }
@@ -88,7 +92,8 @@ export async function finishBettingRound(gameId: string): Promise<void> {
       // 2장 모드인 경우 라운드는 1개이므로 게임 종료
       await logBettingAction(gameId, 'system', 'end_round', {
         message: '베팅 라운드 종료, 게임 결과를 계산합니다.',
-        round: currentRound
+        round: currentRound,
+        nextPlayer: null
       });
       return;
     }
@@ -101,11 +106,13 @@ export async function finishBettingRound(gameId: string): Promise<void> {
       // 2라운드 종료, 게임 종료
       await logBettingAction(gameId, 'system', 'end_round', {
         message: '2라운드 베팅 종료, 게임 결과를 계산합니다.',
-        round: currentRound
+        round: currentRound,
+        nextPlayer: null
       });
     }
-  } catch (error: any) {
-    console.error('베팅 라운드 종료 처리 중 오류:', error);
+  } catch (error: unknown) {
+    const errorMsg = error instanceof Error ? error.message : '알 수 없는 오류';
+    console.error('베팅 라운드 종료 처리 중 오류:', errorMsg);
     await logSystemError(gameId, 'finishBettingRound', error);
     throw error;
   }
@@ -117,7 +124,7 @@ export async function finishBettingRound(gameId: string): Promise<void> {
 async function startRound2(gameId: string, players: Player[]): Promise<void> {
   try {
     // 활성 플레이어 확인
-    const activePlayers = players.filter(p => !p.folded);
+    const activePlayers = players.filter(p => !p.is_die);
     
     if (activePlayers.length <= 1) {
       return; // 한 명만 남았으면 처리 안함
@@ -127,12 +134,17 @@ async function startRound2(gameId: string, players: Player[]): Promise<void> {
     const cardSelectionTime = new Date();
     cardSelectionTime.setSeconds(cardSelectionTime.getSeconds() + 20); // 20초 시간 제한
     
+    // 새출된 betting_end_time 필드도 설정
+    const bettingEndTime = new Date();
+    bettingEndTime.setSeconds(bettingEndTime.getSeconds() + 30); // 30초 베팅 제한 시간
+    
     // 게임 상태 업데이트
     const { error: updateGameError } = await supabase
       .from('games')
       .update({
         betting_round: 2,
-        card_selection_time: cardSelectionTime.toISOString()
+        card_selection_time: cardSelectionTime.toISOString(),
+        betting_end_time: bettingEndTime.toISOString() // 추가된 필드
       })
       .eq('id', gameId);
     
@@ -145,7 +157,11 @@ async function startRound2(gameId: string, players: Player[]): Promise<void> {
       await supabase
         .from('players')
         .update({
-          has_acted: false
+          has_acted: false,
+          last_action: null,
+          last_action_time: null,
+          // 새로 추가된 필드들 초기화
+          last_heartbeat: new Date().toISOString()
         })
         .eq('id', player.id);
     }
@@ -157,8 +173,9 @@ async function startRound2(gameId: string, players: Player[]): Promise<void> {
       activePlayers: activePlayers.length
     });
     
-  } catch (error: any) {
-    console.error('2라운드 시작 중 오류:', error);
+  } catch (error: unknown) {
+    const errorMsg = error instanceof Error ? error.message : '알 수 없는 오류';
+    console.error('2라운드 시작 중 오류:', errorMsg);
     await logSystemError(gameId, 'startRound2', error);
     throw error;
   }
@@ -194,8 +211,8 @@ export async function betAction(
       );
     }
     
-    // 현재 플레이어 턴인지 확인
-    if (game.current_player_id !== playerId) {
+    // 현재 플레이어 턴인지 확인 (current_player_id -> current_turn으로 변경)
+    if (game.current_turn !== playerId) {
       throw handleGameError(
         new Error('현재 턴이 아닙니다'),
         ErrorType.UNAUTHORIZED,
@@ -214,8 +231,8 @@ export async function betAction(
       throw handleResourceNotFoundError('player', playerId, playerError);
     }
     
-    // 이미 폴드한 플레이어인지 확인
-    if (currentPlayer.folded) {
+    // 이미 다이한 플레이어인지 확인
+    if (currentPlayer.is_die) {
       throw handleGameError(
         new Error('이미 폴드한 플레이어입니다'),
         ErrorType.INVALID_STATE,
@@ -280,7 +297,7 @@ export async function betAction(
         if (!amount || amount <= 0) {
           throw handleGameError(
             new Error('유효하지 않은 레이즈 금액'),
-            ErrorType.VALIDATION_ERROR,
+            ErrorType.VALIDATION,
             '레이즈 금액은 0보다 커야 합니다'
           );
         }
@@ -294,7 +311,7 @@ export async function betAction(
         if (finalBetAmount <= maxBet) {
           throw handleGameError(
             new Error('레이즈 금액이 충분하지 않습니다'),
-            ErrorType.VALIDATION_ERROR,
+            ErrorType.VALIDATION,
             `레이즈 금액은 최소 ${minRaiseAmount}이어야 합니다`
           );
         }
@@ -305,7 +322,7 @@ export async function betAction(
         if (betAmount > currentPlayer.balance) {
           throw handleGameError(
             new Error('잔액이 부족합니다'),
-            ErrorType.VALIDATION_ERROR,
+            ErrorType.VALIDATION,
             '잔액이 부족합니다'
           );
         }
@@ -322,7 +339,7 @@ export async function betAction(
       default:
         throw handleGameError(
           new Error(`유효하지 않은 베팅 액션: ${action}`),
-          ErrorType.VALIDATION_ERROR,
+          ErrorType.VALIDATION,
           '유효하지 않은 베팅 액션입니다'
         );
     }
@@ -331,17 +348,18 @@ export async function betAction(
     const playerUpdate: any = {
       has_acted: true,
       last_action: action,
-      last_action_time: new Date().toISOString()
+      last_action_time: new Date().toISOString(),
+      last_heartbeat: new Date().toISOString() // 추가된 필드
     };
     
     // 폴드가 아닌 경우 베팅액과 잔액 업데이트
-    if (action !== 'fold') {
+    if (action === 'check' || action === 'call' || action === 'raise') {
       playerUpdate.current_bet = action === 'check' 
         ? currentPlayer.current_bet 
         : Math.max(maxBet, amount);
-      playerUpdate.balance = newBalance;
-    } else {
-      playerUpdate.folded = true;
+      playerUpdate.balance = newBalance; // 프론트엔드와 호환성 위해 balance 사용
+    } else { // fold 액션은 별도 처리
+      playerUpdate.is_die = true; // folded -> is_die로 변경
     }
     
     const { error: updatePlayerError } = await supabase
@@ -354,17 +372,31 @@ export async function betAction(
     }
     
     // 게임 상태 업데이트
-    const gameUpdate: any = {};
+    interface GameUpdate {
+      total_pot?: number;
+      betting_value?: number;
+      current_turn?: string;
+      last_action?: string;
+      updated_at?: string;
+      betting_end_time?: string; // 추가된 필드
+    }
+    
+    const gameUpdate: GameUpdate = {};
     
     // 베팅 액션이면 총 팟 업데이트
     if (action !== 'check' && action !== 'fold') {
       gameUpdate.total_pot = game.total_pot + betAmount;
       gameUpdate.betting_value = Math.max(game.betting_value, playerUpdate.current_bet);
+      
+      // 베팅 종료 시간 업데이트
+      const bettingEndTime = new Date();
+      bettingEndTime.setSeconds(bettingEndTime.getSeconds() + 30); // 30초 제한시간
+      gameUpdate.betting_end_time = bettingEndTime.toISOString();
     }
     
     // 다음 플레이어 결정
     const nextPlayerId = await getNextPlayerTurn(gameId, playerId);
-    gameUpdate.current_player_id = nextPlayerId;
+    gameUpdate.current_turn = nextPlayerId || undefined;  // current_player_id -> current_turn 으로 변경
     gameUpdate.last_action = `${currentPlayer.username} ${actionDescription}`;
     gameUpdate.updated_at = new Date().toISOString();
     
@@ -377,11 +409,28 @@ export async function betAction(
       throw handleDatabaseError(updateGameError, 'betAction: game update');
     }
     
+    // 게임 액션 기록
+    const { error: actionError } = await supabase.from('game_actions').insert([
+      {
+        game_id: gameId,
+        player_id: playerId,
+        player_name: currentPlayer.username, // 추가된 필드
+        action_type: action,
+        amount: betAmount,
+        betting_round: game.betting_round || 1,
+        created_at: new Date().toISOString() // timestamp -> created_at
+      }
+    ]);
+    
+    if (actionError) {
+      throw handleDatabaseError(actionError, 'betAction: action record');
+    }
+    
     // 베팅 액션 로그 기록
     await logBettingAction(gameId, playerId, action, {
       amount: betAmount,
       totalBet: playerUpdate.current_bet,
-      balance: newBalance,
+      balance: newBalance, // 프론트엔드와 호환성 위해 balance 사용
       nextPlayer: nextPlayerId
     });
     
@@ -415,10 +464,10 @@ export async function betAction(
  */
 export async function handleBettingTimeout(gameId: string, playerId?: string): Promise<{ success: boolean; error?: string }> {
   try {
-    // 게임 상태 확인
+    // 게임 상태 확인 (current_player_id 대신 current_turn 사용)
     const { data: game, error: gameError } = await supabase
       .from('games')
-      .select('status, current_player_id')
+      .select('status, current_turn')
       .eq('id', gameId)
       .single();
     
@@ -434,8 +483,8 @@ export async function handleBettingTimeout(gameId: string, playerId?: string): P
       );
     }
     
-    // playerId가 제공되지 않은 경우 현재 플레이어 ID 사용
-    const currentPlayerId = playerId || game.current_player_id;
+    // playerId가 제공되지 않은 경우 현재 플레이어 ID 사용 (current_turn 사용)
+    const currentPlayerId = playerId || game.current_turn;
     if (!currentPlayerId) {
       throw handleGameError(
         new Error('현재 플레이어 ID를 찾을 수 없습니다'), 
@@ -452,8 +501,8 @@ export async function handleBettingTimeout(gameId: string, playerId?: string): P
       };
     }
     
-    // 현재 턴이 해당 플레이어의 턴인지 확인
-    if (game.current_player_id !== playerId) {
+    // 현재 턴이 해당 플레이어의 턴인지 확인 (current_turn 사용)
+    if (game.current_turn !== playerId) {
       return {
         success: false,
         error: '해당 플레이어의 턴이 아닙니다'
@@ -483,9 +532,10 @@ export async function handleBettingTimeout(gameId: string, playerId?: string): P
     const { error: updatePlayerError } = await supabase
       .from('players')
       .update({
-        folded: true,
+        is_die: true, // folded -> is_die로 변경
         last_action: 'fold',
-        last_action_time: new Date().toISOString()
+        last_action_time: new Date().toISOString(),
+        last_heartbeat: new Date().toISOString() // 추가된 필드
       })
       .eq('id', playerId);
     
@@ -494,13 +544,14 @@ export async function handleBettingTimeout(gameId: string, playerId?: string): P
     }
     
     // 다음 플레이어 결정
-    const nextPlayerId = await getNextPlayerTurn(gameId, currentPlayerId);
+    // 다음 플레이어 결정 - 환경에 따라 null이나 undefined가 될 수 있음
+    const nextPlayerResult = await getNextPlayerTurn(gameId, currentPlayerId);
     
-    // 게임 상태 업데이트
+    // 게임 상태 업데이트 (current_player_id -> current_turn으로 변경)
     const { error: updateGameError } = await supabase
       .from('games')
       .update({
-        current_player_id: nextPlayerId,
+        current_turn: nextPlayerResult,
         last_action: `${player.username} 시간 초과로 폴드`
       })
       .eq('id', gameId);
@@ -509,11 +560,19 @@ export async function handleBettingTimeout(gameId: string, playerId?: string): P
       throw handleDatabaseError(updateGameError, '게임 상태 업데이트 실패');
     }
     
-    // 알림 메시지 기록
-    await logBettingAction(gameId, playerId, 'fold', {
-      reason: 'timeout',
-      message: `${player.username}님이 시간 초과로 자동 폴드되었습니다.`
-    });
+    // 알림 메시지 기록 - 🔐 타입 안전성을 위해 방법 변경
+    try {
+      const logMessage = `${player.username}님이 시간 초과로 자동 폴드되었습니다.`;
+      const logData = {
+        reason: 'timeout',
+        message: logMessage,
+        // nextPlayer 메타데이터를 제거하고 logInfo로 직접 처리
+      };
+      await logInfo(gameId, 'betting', logMessage, playerId, { ...logData, action: 'fold' });
+    } catch (logError) {
+      console.error('로그 기록 중 오류:', logError);
+      // 로그 오류는 있어도 게임 진행에 영향을 주지 않음
+    }
     
     // 라운드 완료 여부 확인
     // 모든 플레이어 정보 조회
@@ -526,7 +585,7 @@ export async function handleBettingTimeout(gameId: string, playerId?: string): P
       throw handleDatabaseError(allPlayersError, 'handleBettingTimeout: all players');
     }
     
-    const activePlayers = allPlayers.filter(p => !p.folded);
+    const activePlayers = allPlayers.filter(p => !p.is_die);
     
     if (activePlayers.length <= 1) {
       await finishBettingRound(gameId);

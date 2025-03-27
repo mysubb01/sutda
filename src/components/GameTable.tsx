@@ -643,16 +643,8 @@ export function GameTable({
               }
               // 게임이 진행 중(이미 진행중인 경우)
               else if (gameState.status === 'playing') {
-                return (
-                  <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-center z-30">
-                    <div className="px-4 py-2 bg-black bg-opacity-70 rounded-lg border border-yellow-600 shadow-lg max-w-sm w-full">
-                      <h2 className="text-xl font-bold text-yellow-400 mb-2">게임 진행 중</h2>
-                      <p className="text-white text-sm mb-3">
-                        진행 중인 상태입니다. {gameState.currentTurn && '현재 플레이어의 턴입니다.'}
-                      </p>
-                    </div>
-                  </div>
-                );
+                // 게임 진행 중일 때는 알림 메시지를 표시하지 않음 (타이머가 보이도록)
+                return null;
               }
               // 기본 경우는 null 반환 (표시 없음)
               return null;
