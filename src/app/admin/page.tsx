@@ -292,19 +292,19 @@ export default function AdminPage() {
   }, [activeTab, success]);
 
   return (
-    <div className="container mx-auto p-4 bg-gradient-to-br from-gray-900 to-blue-900 min-h-screen">
-      <h1 className="text-2xl font-bold mb-6 text-white border-b-2 border-blue-400 pb-2">관리자 설정</h1>
+    <div className="container mx-auto p-4 bg-gray-100 min-h-screen">
+      <h1 className="text-2xl font-bold mb-6 text-gray-800 border-b-2 border-blue-400 pb-2">관리자 설정</h1>
       
       {/* 탭 메뉴 */}
-      <div className="flex bg-gray-700 rounded-t-lg mb-6">
+      <div className="flex bg-white rounded-t-lg mb-6 shadow">
         <button
-          className={`px-6 py-3 font-medium ${activeTab === AdminTab.ROOMS ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-600'} rounded-tl-lg transition-colors`}
+          className={`px-6 py-3 font-medium ${activeTab === AdminTab.ROOMS ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-100'} rounded-tl-lg transition-colors`}
           onClick={() => setActiveTab(AdminTab.ROOMS)}
         >
           방 관리
         </button>
         <button
-          className={`px-6 py-3 font-medium ${activeTab === AdminTab.PLAYERS ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-600'} transition-colors`}
+          className={`px-6 py-3 font-medium ${activeTab === AdminTab.PLAYERS ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-100'} transition-colors`}
           onClick={() => setActiveTab(AdminTab.PLAYERS)}
         >
           전체 플레이어
@@ -327,10 +327,10 @@ export default function AdminPage() {
       {/* 방 관리 탭 컨텐츠 */}
       {activeTab === AdminTab.ROOMS && (
         <div className="space-y-6">
-          {/* 방 목록 (기존 코드) */}
+          {/* 방 목록 */}
           <div className="bg-white rounded-lg shadow-lg overflow-hidden">
-            <div className="p-4 border-b bg-gray-50">
-              <h2 className="text-lg font-semibold">방 목록</h2>
+            <div className="p-4 border-b bg-blue-50">
+              <h2 className="text-lg font-semibold text-blue-800">방 목록</h2>
             </div>
             <div className="overflow-x-auto">
               {loading && !selectedRoom ? (
@@ -341,9 +341,9 @@ export default function AdminPage() {
                 <table className="min-w-full">
                   <thead className="bg-gray-100">
                     <tr>
-                      <th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">방 이름</th>
-                      <th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">생성일</th>
-                      <th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">관리</th>
+                      <th className="py-3 px-4 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">방 이름</th>
+                      <th className="py-3 px-4 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">생성일</th>
+                      <th className="py-3 px-4 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">관리</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
@@ -353,7 +353,7 @@ export default function AdminPage() {
                         className={`hover:bg-blue-50 cursor-pointer ${selectedRoom?.id === room.id ? 'bg-blue-100' : ''}`}
                       >
                         <td className="py-3 px-4" onClick={() => handleRoomSelect(room)}>
-                          {room.name}
+                          <span className="font-medium text-blue-700">{room.name}</span>
                         </td>
                         <td className="py-3 px-4" onClick={() => handleRoomSelect(room)}>
                           {new Date(room.created_at).toLocaleString()}
@@ -374,7 +374,7 @@ export default function AdminPage() {
             </div>
           </div>
 
-          {/* 방 상세 정보 (기존 코드 + 방 삭제 버튼 추가) */}
+          {/* 방 상세 정보 */}
           {roomDetails && (
             <div className="bg-white rounded-lg shadow-lg overflow-hidden">
               <div className="p-4 border-b bg-gray-50 flex justify-between items-center">
@@ -387,7 +387,6 @@ export default function AdminPage() {
                 </button>
               </div>
               
-              {/* 기존 방 상세 정보 내용 */}
               <div className="p-4">
                 {/* 현재 게임 정보 */}
                 <div className="mb-6">
@@ -499,8 +498,8 @@ export default function AdminPage() {
       {/* 전체 플레이어 탭 컨텐츠 */}
       {activeTab === AdminTab.PLAYERS && (
         <div className="bg-white rounded-lg shadow-lg overflow-hidden">
-          <div className="p-4 border-b bg-gray-50">
-            <h2 className="text-lg font-semibold">전체 플레이어 목록</h2>
+          <div className="p-4 border-b bg-blue-50">
+            <h2 className="text-lg font-semibold text-blue-800">전체 플레이어 목록</h2>
           </div>
           
           {loading ? (
@@ -522,21 +521,21 @@ export default function AdminPage() {
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {allPlayers.map((player) => (
-                    <tr key={player.id}>
+                    <tr key={player.id} className="hover:bg-blue-50">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
                           <div>
-                            <div className="text-sm font-medium text-gray-900">{player.username}</div>
+                            <div className="text-sm font-medium text-blue-700">{player.username}</div>
                             <div className="text-sm text-gray-500">{player.user_id}</div>
                           </div>
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">{player.balance.toLocaleString()}원</div>
+                        <div className="text-sm font-medium text-green-600">{player.balance.toLocaleString()}원</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-900">
-                          {player.rooms ? (player.rooms as any).name : '없음'}
+                          {player.rooms ? player.rooms.name : '없음'}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -556,7 +555,7 @@ export default function AdminPage() {
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {new Date(player.created_at).toLocaleString()}
+                        {player.created_at ? new Date(player.created_at).toLocaleString() : '등록일 없음'}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                         <button
@@ -591,7 +590,7 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* 잔액 수정 모달 (기존 코드와 동일) */}
+      {/* 잔액 수정 모달 */}
       {playerToUpdateId && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full">

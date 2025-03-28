@@ -479,8 +479,7 @@ export async function getAllPlayers() {
       .from("players")
       .select(`
         *,
-        rooms(id, name),
-        users(id, email)
+        rooms:room_id(id, name)
       `)
       .order("created_at", { ascending: false });
 

@@ -42,7 +42,7 @@ export interface Player {
   cards?: number[];
   open_card?: number; // 3장 모드에서 공개된 카드
   selected_cards?: number[]; // 3장 모드에서 최종 선택한 카드
-  is_die?: boolean; // 폴드 여부 (folded -> is_die로 통일함)
+  is_die?: boolean; // 프론트엔드 호환성 위해 is_die 사용
   current_bet?: number; // 현재 베팅 금액
   position?: number;
   seat_index?: number; // 테이블에서의 좌석 인덱스 (0-7)
@@ -55,6 +55,12 @@ export interface Player {
   last_action_time?: string; // 마지막 액션 시간
   last_heartbeat?: string; // 마지막 하트비트 시간
   has_acted?: boolean; // 현재 턴에 액션을 취했는지 여부
+  folded?: boolean; // DB 스키마에 추가된 필드 (is_die와 역할 중복 가능성 있음, 프론트 호환성 위해 is_die 유지)
+  rooms?: {
+    id: string;
+    name: string;
+  };
+  created_at?: string; // 생성 시간
 }
 
 /**
