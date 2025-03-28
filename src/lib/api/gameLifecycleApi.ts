@@ -39,8 +39,7 @@ export async function startDebugGame(gameId: string): Promise<void> {
     const { data: playersData, error: playersError } = await supabase
       .from('players')
       .select('*')
-      .eq('game_id', gameId)
-      .eq('is_active', true);
+      .eq('game_id', gameId);
 
     if (playersError) {
       console.error(`[ERROR] [game] 플레이어 정보 조회 실패:`, playersError);
@@ -90,6 +89,9 @@ export async function startDebugGame(gameId: string): Promise<void> {
     
     // 게임 상태 업데이트 (여기서 명시적으로 'playing'으로 설정)
     console.log(`[INFO] [game] 게임 상태 'playing'으로 업데이트 시작`);
+    const initialBettingEndTime = new Date();
+    initialBettingEndTime.setSeconds(initialBettingEndTime.getSeconds() + 30); // 초기 타이머 30초 설정
+    
     const { data: updateData, error: updateGameError } = await supabase
       .from('games')
       .update({
@@ -99,7 +101,8 @@ export async function startDebugGame(gameId: string): Promise<void> {
         current_bet_amount: baseBet,
         pot: baseBet * playersData.length,
         updated_at: new Date().toISOString(),
-        round: 1
+        round: 1,
+        betting_end_time: initialBettingEndTime.toISOString() // 초기 betting_end_time 설정
       })
       .eq('id', gameId)
       .select();
@@ -238,6 +241,9 @@ export async function startGame(gameId: string, playerId?: string): Promise<{ su
     
     // 게임 상태 업데이트 - 실제 DB 스키마에 존재하는 필드만 사용
     console.log(`[startGame] 게임 상태 업데이트: ${gameId}, 상태 'playing'으로 변경`);
+    const initialBettingEndTime = new Date();
+    initialBettingEndTime.setSeconds(initialBettingEndTime.getSeconds() + 30); // 초기 타이머 30초 설정
+
     const { data: updateData, error: updateGameError } = await supabase
       .from('games')
       .update({
@@ -248,7 +254,8 @@ export async function startGame(gameId: string, playerId?: string): Promise<{ su
         pot: baseBet * playersData.length, // 총 팟 (total_pot과 동일하지만 호환성 위해)
         updated_at: new Date().toISOString(),
         betting_round: 1, // betting_round 필드
-        round: 1 // 호환성을 위한 round 필드
+        round: 1, // 호환성을 위한 round 필드
+        betting_end_time: initialBettingEndTime.toISOString() // 초기 betting_end_time 설정
       })
       .eq('id', gameId)
       .select();

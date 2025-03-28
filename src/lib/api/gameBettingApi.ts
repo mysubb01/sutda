@@ -136,7 +136,7 @@ async function startRound2(gameId: string, players: Player[]): Promise<void> {
     
     // 새출된 betting_end_time 필드도 설정
     const bettingEndTime = new Date();
-    bettingEndTime.setSeconds(bettingEndTime.getSeconds() + 30); // 30초 베팅 제한 시간
+    bettingEndTime.setSeconds(bettingEndTime.getSeconds() + 60); // 60초 베팅 제한 시간
     
     // 게임 상태 업데이트
     const { error: updateGameError } = await supabase
@@ -460,7 +460,7 @@ export async function betAction(
       current_turn?: string; // current_turn으로 통합
       last_action?: string;
       updated_at?: string;
-      betting_end_time?: string; // 추가된 필드
+      betting_end_time?: string | null; // string | undefined -> string | null | undefined
     }
     
     const gameUpdate: GameUpdate = {};
@@ -469,11 +469,6 @@ export async function betAction(
     if (action !== 'check' && action !== 'fold') {
       gameUpdate.total_pot = game.total_pot + betAmount;
       gameUpdate.betting_value = Math.max(game.betting_value, playerUpdate.current_bet);
-      
-      // 베팅 종료 시간 업데이트
-      const bettingEndTime = new Date();
-      bettingEndTime.setSeconds(bettingEndTime.getSeconds() + 30); // 30초 제한시간
-      gameUpdate.betting_end_time = bettingEndTime.toISOString();
     }
     
     // 다음 플레이어 결정
@@ -482,7 +477,38 @@ export async function betAction(
     gameUpdate.current_turn = nextPlayerId || undefined;  // current_turn 사용
     gameUpdate.last_action = `${currentPlayer.username} ${actionDescription}`;
     gameUpdate.updated_at = new Date().toISOString();
-    
+
+    // === betting_end_time 설정 로직 수정 시작 ===
+    // 현재 시점의 활성 플레이어 수를 다시 확인
+    const { data: currentActivePlayers, error: activePlayerError } = await supabase
+      .from('players')
+      .select('id')
+      .eq('game_id', gameId)
+      .eq('is_die', false); // 폴드하지 않은 플레이어
+
+    if (activePlayerError) {
+      console.error('[betAction] 활성 플레이어 재확인 중 오류:', activePlayerError);
+      // 오류 처리 로직 추가 가능 (예: 업데이트 중단)
+      throw handleDatabaseError(activePlayerError, 'betAction: checking active players');
+    }
+
+    const activePlayerCount = currentActivePlayers?.length || 0;
+    console.log(`[betAction] 현재 활성 플레이어 수: ${activePlayerCount}`);
+
+    // 활성 플레이어가 2명 이상이고 다음 턴 플레이어가 있으면 타이머 설정
+    if (activePlayerCount > 1 && nextPlayerId) {
+      const bettingEndTime = new Date();
+      bettingEndTime.setSeconds(bettingEndTime.getSeconds() + 30);
+      gameUpdate.betting_end_time = bettingEndTime.toISOString();
+      console.log(`[betAction] 다음 턴 타이머 설정: ${gameUpdate.betting_end_time}`);
+    } else {
+      // 라운드 종료 또는 마지막 플레이어 턴일 경우 타이머 제거
+      gameUpdate.betting_end_time = null;
+      console.log(`[betAction] 라운드 종료 가능성, 타이머 제거.`);
+      // 여기서 라운드 종료 로직(checkRoundCompletion 등)을 호출하는 것을 고려할 수 있음
+    }
+    // === betting_end_time 설정 로직 수정 끝 ===
+
     const { error: updateGameError } = await supabase
       .from('games')
       .update(gameUpdate)
