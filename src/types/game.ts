@@ -56,6 +56,11 @@ export interface Player {
   last_heartbeat?: string; // 마지막 하트비트 시간
   has_acted?: boolean; // 현재 턴에 액션을 취했는지 여부
   folded?: boolean; // DB 스키마에 추가된 필드 (is_die와 역할 중복 가능성 있음, 프론트 호환성 위해 is_die 유지)
+  rooms?: {
+    id: string;
+    name: string;
+  };
+  created_at?: string; // 생성 시간
 }
 
 /**
