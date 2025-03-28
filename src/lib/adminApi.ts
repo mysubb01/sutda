@@ -373,3 +373,132 @@ export async function getRoomDetails(roomId: string) {
     };
   }
 }
+
+/**
+ * 방 삭제 API
+ * @param roomId 삭제할 방 ID
+ */
+export async function deleteRoom(roomId: string) {
+  try {
+    // 방 정보 가져오기
+    const { data: roomData, error: roomError } = await supabase
+      .from("rooms")
+      .select("name")
+      .eq("id", roomId)
+      .single();
+
+    if (roomError) {
+      throw roomError;
+    }
+
+    // 해당 방의 플레이어 조회
+    const { data: players, error: playersError } = await supabase
+      .from("players")
+      .select("id")
+      .eq("room_id", roomId);
+
+    if (playersError) {
+      throw playersError;
+    }
+
+    // 해당 방의 게임 조회
+    const { data: games, error: gamesError } = await supabase
+      .from("games")
+      .select("id")
+      .eq("room_id", roomId);
+
+    if (gamesError) {
+      throw gamesError;
+    }
+
+    // 트랜잭션은 지원되지 않으므로 순차적으로 삭제
+    // 1. 플레이어 삭제
+    if (players && players.length > 0) {
+      const playerIds = players.map(p => p.id);
+      const { error: deletePlayersError } = await supabase
+        .from("players")
+        .delete()
+        .in("id", playerIds);
+
+      if (deletePlayersError) {
+        throw deletePlayersError;
+      }
+    }
+
+    // 2. 게임 삭제
+    if (games && games.length > 0) {
+      const gameIds = games.map(g => g.id);
+      
+      // 게임 관련 채팅 메시지 삭제
+      const { error: deleteMessagesError } = await supabase
+        .from("messages")
+        .delete()
+        .in("game_id", gameIds);
+
+      if (deleteMessagesError) {
+        throw deleteMessagesError;
+      }
+
+      // 게임 삭제
+      const { error: deleteGamesError } = await supabase
+        .from("games")
+        .delete()
+        .in("id", gameIds);
+
+      if (deleteGamesError) {
+        throw deleteGamesError;
+      }
+    }
+
+    // 3. 방 삭제
+    const { error: deleteRoomError } = await supabase
+      .from("rooms")
+      .delete()
+      .eq("id", roomId);
+
+    if (deleteRoomError) {
+      throw deleteRoomError;
+    }
+
+    return { 
+      success: true, 
+      message: `'${roomData.name}' 방이 성공적으로 삭제되었습니다.` 
+    };
+  } catch (error: any) {
+    console.error("방 삭제 중 오류 발생:", error.message);
+    return { success: false, message: "방 삭제 중 오류가 발생했습니다." };
+  }
+}
+
+/**
+ * 모든 플레이어 목록 조회
+ */
+export async function getAllPlayers() {
+  try {
+    const { data, error } = await supabase
+      .from("players")
+      .select(`
+        *,
+        rooms(id, name),
+        users(id, email)
+      `)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      throw error;
+    }
+
+    return {
+      success: true,
+      data,
+      message: "플레이어 목록을 성공적으로 가져왔습니다."
+    };
+  } catch (error: any) {
+    console.error("플레이어 목록 조회 중 오류 발생:", error.message);
+    return { 
+      success: false, 
+      data: null,
+      message: "플레이어 목록을 불러올 수 없습니다." 
+    };
+  }
+}
