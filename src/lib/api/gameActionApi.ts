@@ -360,23 +360,25 @@ export async function handleBettingTimeout(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     console.log(
-      `[handleBettingTimeout] Timeout for player ${
+      `[handleBettingTimeout] ========= 시작: 플레이어 ${
         playerId || "unknown"
-      } in game ${gameId}`
+      }, 게임 ${gameId} =========`
     );
 
-    // 트랜잭션 시작 - 턴 전환을 원자적으로 처리하기 위해
+    // 최신 게임 상태 확인 - 더 많은 필드 선택
     const { data: game, error: gameError } = await supabase
       .from("games")
-      .select("status, current_turn, betting_end_time")
+      .select("id, status, current_turn, betting_end_time, round, total_pot")
       .eq("id", gameId)
       .single();
 
     if (gameError) {
+      console.error(`[handleBettingTimeout] 게임 조회 오류:`, gameError);
       throw handleDatabaseError(gameError, "게임 정보 조회 실패");
     }
 
     if (!game) {
+      console.error(`[handleBettingTimeout] 게임을 찾을 수 없음: ${gameId}`);
       throw handleGameError(
         new Error("게임을 찾을 수 없습니다"),
         ErrorType.NOT_FOUND,
@@ -384,9 +386,12 @@ export async function handleBettingTimeout(
       );
     }
 
-    // playerId가 제공되지 않은 경우 현재 플레이어 ID 사용
+    console.log(`[handleBettingTimeout] 게임 상태:`, JSON.stringify(game, null, 2));
+
+    // 현재 턴 플레이어 결정 (인자로 전달된 playerId가 우선, 없으면 게임의 current_turn 사용)
     const currentPlayerId = playerId || game.current_turn;
     if (!currentPlayerId) {
+      console.error(`[handleBettingTimeout] 현재 플레이어 ID 없음`);
       throw handleGameError(
         new Error("현재 플레이어 ID를 찾을 수 없습니다"),
         ErrorType.NOT_FOUND,
@@ -394,36 +399,44 @@ export async function handleBettingTimeout(
       );
     }
 
-    // 게임이 진행 중이 아니면 처리하지 않음
+    // 게임이 진행 중인지 확인
     if (game.status !== GameStatus.PLAYING) {
+      console.log(`[handleBettingTimeout] 게임이 진행 중이 아님: ${game.status}`);
       return {
         success: false,
         error: "게임이 진행 중이 아닙니다",
       };
     }
 
-    // 현재 턴이 해당 플레이어의 턴인지 확인
-    if (game.current_turn !== currentPlayerId) {
+    // 지정된 플레이어가 현재 턴인지 확인 
+    // 참고: 강제 타임아웃일 경우 playerId가 지정되고 턴 체크를 하지 않음
+    if (playerId && game.current_turn !== playerId) {
+      console.log(`[handleBettingTimeout] 지정된 플레이어의 턴이 아님: 현재턴=${game.current_turn}, 지정=${playerId}`);
       return {
         success: false,
         error: "해당 플레이어의 턴이 아닙니다",
       };
     }
 
-    console.log(`[handleBettingTimeout] 유효한 타임아웃 확인: currentPlayerId=${currentPlayerId}, game.current_turn=${game.current_turn}`);
-
-    // 플레이어 정보 조회
-    const { data: player, error: playerError } = await supabase
+    // 전체 플레이어 정보 가져오기
+    const { data: allPlayers, error: playersError } = await supabase
       .from("players")
-      .select("username, is_die")
-      .eq("id", currentPlayerId)
-      .single();
+      .select("id, username, is_die, is_playing, seat_index")
+      .eq("game_id", gameId);
 
-    if (playerError) {
-      throw handleDatabaseError(playerError, "플레이어 정보 조회 실패");
+    if (playersError) {
+      console.error(`[handleBettingTimeout] 플레이어 목록 조회 오류:`, playersError);
+      throw handleDatabaseError(playersError, "플레이어 목록 조회 실패");
     }
 
-    if (!player) {
+    // 참여 중인 플레이어 목록 (폴드되지 않은)
+    const activePlayers = allPlayers.filter(p => p.is_playing && !p.is_die);
+    console.log(`[handleBettingTimeout] 활성 플레이어 수: ${activePlayers.length}`);
+    
+    // 현재 턴 플레이어 정보 가져오기
+    const currentPlayer = allPlayers.find(p => p.id === currentPlayerId);
+    if (!currentPlayer) {
+      console.error(`[handleBettingTimeout] 현재 턴 플레이어를 찾을 수 없음: ${currentPlayerId}`);
       throw handleGameError(
         new Error("플레이어를 찾을 수 없습니다"),
         ErrorType.NOT_FOUND,
@@ -431,74 +444,163 @@ export async function handleBettingTimeout(
       );
     }
 
-    // 이미 폴드된 플레이어라면 중복 처리하지 않음
-    if (player.is_die) {
-      console.log(`[handleBettingTimeout] 플레이어 ${currentPlayerId}는 이미 폴드 상태입니다`);
-      // 다음 플레이어로 턴 넘김
+    // 이미 폴드된 플레이어라면 그냥 다음 턴으로 넘김
+    if (currentPlayer.is_die) {
+      console.log(`[handleBettingTimeout] 플레이어 ${currentPlayerId}는 이미 폴드 상태임`);
+      
+      // 다음 플레이어 구하기
       const nextPlayerId = await getNextPlayerTurn(gameId, currentPlayerId);
+      console.log(`[handleBettingTimeout] 이미 폴드된 플레이어의 다음 턴: ${nextPlayerId || '없음'}`);
+      
       if (nextPlayerId) {
-        // 게임 상태 업데이트: 다음 플레이어로 턴 넘김
-        await supabase
+        // 게임 상태 업데이트 - 턴만 넘기고 타이머 리셋
+        const { error: updateError } = await supabase
           .from("games")
           .update({
             current_turn: nextPlayerId,
-            betting_end_time: new Date(Date.now() + 35000).toISOString(), // 타이머 35초로 설정 (여유있게)
+            betting_end_time: new Date(Date.now() + 40000).toISOString(), // 타이머 40초로 설정 (버퍼 증가)
+            updated_at: new Date().toISOString(),
           })
           .eq("id", gameId);
-        console.log(`[handleBettingTimeout] 이미 폴드된 플레이어의 다음 턴으로 넘김: nextPlayerId=${nextPlayerId}`);
+
+        if (updateError) {
+          console.error(`[handleBettingTimeout] 게임 상태 업데이트 오류:`, updateError);
+          throw handleDatabaseError(updateError, "게임 상태 업데이트 실패");
+        }
+        
+        console.log(`[handleBettingTimeout] 이미 폴드된 플레이어의 다음 턴으로 성공적으로 넘김`);
       }
+      
       return { success: true };
     }
 
-    // 자동 폴드 처리 (is_die로 통일)
+    // 자동 폴드 처리 (is_die = true로 설정)
+    console.log(`[handleBettingTimeout] 플레이어 ${currentPlayerId} 자동 폴드 처리 시작`);
     const { error: updatePlayerError } = await supabase
       .from("players")
       .update({
         is_die: true,
-        has_acted: true, // 플레이어가 액션을 취했음을 표시
+        has_acted: true,
         last_action: "fold",
         last_action_time: new Date().toISOString(),
       })
       .eq("id", currentPlayerId);
 
     if (updatePlayerError) {
+      console.error(`[handleBettingTimeout] 플레이어 폴드 처리 오류:`, updatePlayerError);
       throw handleDatabaseError(
         updatePlayerError,
         "플레이어 상태 업데이트 실패"
       );
     }
     
-    console.log(`[handleBettingTimeout] 플레이어 ${currentPlayerId} 자동 폴드 처리 완료 (is_die=true, has_acted=true)`);
+    console.log(`[handleBettingTimeout] 플레이어 ${currentPlayerId} 자동 폴드 처리 완료`);
 
-    // 다음 플레이어 결정
-    const nextPlayerId = await getNextPlayerTurn(gameId, currentPlayerId);
-    console.log(`[handleBettingTimeout] 다음 플레이어 ID: ${nextPlayerId || '없음'}`);
-
-    // 게임 상태 업데이트 - 타이머 시간을 35초로 늘려 시간 초과 문제 방지
-    const { error: updateGameError } = await supabase
+    // 현재 게임 상태 재확인 (타이머 초기화 여부 확인)
+    const { data: currentGameState } = await supabase
       .from("games")
-      .update({
-        current_turn: nextPlayerId,
-        last_action: `${player.username} 시간 초과로 폴드`,
-        betting_end_time: nextPlayerId ? new Date(Date.now() + 35000).toISOString() : null, // 타이머 35초로 설정
-      })
-      .eq("id", gameId);
+      .select("id, status, current_turn, betting_end_time")
+      .eq("id", gameId)
+      .single();
       
-    console.log(`[handleBettingTimeout] 게임 상태 업데이트: nextPlayerId=${nextPlayerId}, gameId=${gameId}`);
+    console.log(`[handleBettingTimeout] 현재 게임 상태 (다음 플레이어 결정 전):`, currentGameState);
+    
+    // 다음 플레이어 결정
+    console.log(`[handleBettingTimeout] 다음 플레이어 ID 결정 중... 현재: ${currentPlayerId}`);
+    const nextPlayerId = await getNextPlayerTurn(gameId, currentPlayerId);
+    console.log(`[handleBettingTimeout] 다음 플레이어 ID 결정됨: ${nextPlayerId || '없음 (라운드 종료)'}`);
 
-    if (updateGameError) {
-      throw handleDatabaseError(updateGameError, "게임 상태 업데이트 실패");
+    // 게임 상태 업데이트를 위한 데이터 준비
+    const now = new Date();
+    const newBettingEndTime = nextPlayerId ? new Date(now.getTime() + 40000).toISOString() : null;
+    
+    const updateData: any = {
+      current_turn: nextPlayerId,
+      last_action: `${currentPlayer.username} 시간 초과로 폴드`,
+      betting_end_time: newBettingEndTime,
+      updated_at: now.toISOString(),
+    };
+    
+    console.log(`[handleBettingTimeout] 게임 상태 업데이트 시작:`, JSON.stringify(updateData, null, 2));
+    
+    // 트랜잭션 내에서 업데이트 실행 - 다른 처리와 원자적 실행 보장
+    try {
+      const { error: updateGameError } = await supabase
+        .from("games")
+        .update(updateData)
+        .eq("id", gameId);
+          
+      if (updateGameError) {
+        console.error(`[handleBettingTimeout] 게임 상태 업데이트 오류:`, updateGameError);
+        throw handleDatabaseError(updateGameError, "게임 상태 업데이트 실패");
+      }
+      
+      console.log(`[handleBettingTimeout] 게임 상태 업데이트 완료`);
+      
+      // 업데이트 후 즉시 상태 재확인 (타이머 업데이트 확인)
+      const { data: stateAfterUpdate } = await supabase
+        .from("games")
+        .select("id, status, current_turn, betting_end_time")
+        .eq("id", gameId)
+        .single();
+        
+      console.log(`[handleBettingTimeout] 업데이트 후 상태:`, stateAfterUpdate);
+      
+      // 업데이트가 실제로 적용되지 않은 경우 추가 재시도
+      if (stateAfterUpdate && (
+          stateAfterUpdate.current_turn !== nextPlayerId ||
+          stateAfterUpdate.betting_end_time !== newBettingEndTime)) {
+        console.warn(`[handleBettingTimeout] 게임 상태 업데이트가 완전히 적용되지 않았습니다. 재시도...`);
+        
+        // 지연 후 재시도
+        const { error: retryError } = await supabase
+          .from("games")
+          .update(updateData)
+          .eq("id", gameId);
+          
+        if (retryError) {
+          console.error(`[handleBettingTimeout] 재시도 업데이트 오류:`, retryError);
+        } else {
+          console.log(`[handleBettingTimeout] 재시도 업데이트 성공`);
+        }
+      }
+    } catch (updateError) {
+      console.error(`[handleBettingTimeout] 게임 상태 업데이트 중 예외 발생:`, updateError);
+      throw updateError;
+    }
+    
+    // 알림 메시지 기록
+    try {
+      await sendGameMessage(
+        gameId,
+        "system",
+        `${currentPlayer.username}님이 시간 초과로 자동 폴드되었습니다.`
+      );
+      console.log(`[handleBettingTimeout] 폴드 알림 메시지 전송 완료`);
+    } catch (msgError) {
+      console.error(`[handleBettingTimeout] 알림 메시지 전송 중 오류:`, msgError);
+      // 메시지 오류는 크리티켜하지 않으므로 오류 전파하지 않음
     }
 
-    // 알림 메시지 기록
-    await sendGameMessage(
-      gameId,
-      "system",
-      `${player.username}님이 시간 초과로 자동 폴드되었습니다.`
-    );
-
     // 라운드 완료 여부 확인
-    await checkRoundCompletion(gameId);
+    console.log(`[handleBettingTimeout] 라운드 완료 여부 체크`);
+    try {
+      await checkRoundCompletion(gameId);
+      console.log(`[handleBettingTimeout] 라운드 완료 체크 완료`);
+    } catch (roundError) {
+      console.error(`[handleBettingTimeout] 라운드 완료 체크 중 오류:`, roundError);
+      // 라운드 완료 오류는 턴 전환에 영향을 주지 않으므로 오류 전파하지 않음
+    }
+
+    // 최종 게임 상태 재확인 (최종 검증 목적)
+    const { data: finalGame } = await supabase
+      .from("games")
+      .select("id, status, current_turn, betting_end_time, updated_at")
+      .eq("id", gameId)
+      .single();
+      
+    console.log(`[handleBettingTimeout] 최종 게임 상태:`, finalGame);
+    console.log(`[handleBettingTimeout] ========= 종료: 성공 =========`);
 
     return { success: true };
   } catch (error: any) {
