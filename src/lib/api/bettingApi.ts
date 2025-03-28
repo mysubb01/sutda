@@ -116,14 +116,29 @@ export async function processBetting(
     switch (action) {
       case BettingAction.CALL:
         // 콜 처리
-        if (gameData.current_bet_amount > 0) {
-          const callAmount = Math.min(
-            gameData.current_bet_amount - playerData.current_bet,
-            playerData.chips
+        if (gameData.current_bet_amount <= 0) {
+          throw handleGameError(
+            null,
+            ErrorType.INVALID_STATE,
+            "현재 베팅이 없을 때는 콜할 수 없습니다. 체크를 사용하세요."
           );
-          updatedPlayerChips -= callAmount;
-          updatedPot += callAmount;
         }
+        
+        // 현재 플레이어의 베팅액이 최대 베팅액과 같은 경우
+        if (playerData.current_bet >= gameData.current_bet_amount) {
+          throw handleGameError(
+            null,
+            ErrorType.INVALID_STATE,
+            "이미 최대 베팅액과 동일합니다. 체크를 사용하세요."
+          );
+        }
+        
+        const callAmount = Math.min(
+          gameData.current_bet_amount - playerData.current_bet,
+          playerData.chips
+        );
+        updatedPlayerChips -= callAmount;
+        updatedPot += callAmount;
         nextAction = "called";
         break;
 
@@ -152,14 +167,11 @@ export async function processBetting(
 
       case BettingAction.CHECK:
         // 체크 처리
-        if (
-          gameData.current_bet_amount > 0 &&
-          playerData.current_bet < gameData.current_bet_amount
-        ) {
+        if (gameData.current_bet_amount > 0 && playerData.current_bet < gameData.current_bet_amount) {
           throw handleGameError(
             null,
             ErrorType.INVALID_STATE,
-            "현재 베팅이 있을 때는 체크할 수 없습니다"
+            "현재 베팅이 있을 때는 체크할 수 없습니다. 콜이나 레이즈를 사용하세요."
           );
         }
         nextAction = "checked";
@@ -461,6 +473,9 @@ export async function endRound(gameId: string): Promise<void> {
 
     // 게임 상태 업데이트
     const newRound = (game.round || 1) + 1;
+    // 한 명만 남았을 때는 게임을 완전히 종료 상태로 설정
+    const isGameFinished = activePlayers.length === 1;
+    
     const { error: updateGameError } = await supabase
       .from("games")
       .update({
@@ -471,6 +486,8 @@ export async function endRound(gameId: string): Promise<void> {
           ? `${winnerUsername} won the pot (${game.pot} chips)`
           : "Round ended",
         last_winner_id: winnerId,
+        status: isGameFinished ? 'finished' : game.status,
+        winner: isGameFinished ? winnerId : null
       })
       .eq("id", gameId);
 
@@ -656,6 +673,59 @@ export function createShuffledDeck(): number[] {
   }
 
   return cards;
+}
+
+/**
+ * 현재 게임 상태와 플레이어 상태에 따라 사용 가능한 베팅 액션을 가져옴
+ * 
+ * @param gameState 현재 게임 상태 데이터
+ * @param playerState 현재 플레이어 상태 데이터
+ * @param blindAmount 최소 베팅 금액(블라인드)
+ * @returns 가능한 베팅 액션 목록
+ */
+export function getAvailableBettingActions(gameState: any, playerState: any, blindAmount: number): { 
+  actions: BettingAction[];
+  descriptions: string[];
+} {
+  const actions: BettingAction[] = [];
+  const descriptions: string[] = [];
+  
+  // 폴드는 항상 가능
+  actions.push(BettingAction.FOLD);
+  descriptions.push('폴드(Fold) - 게임에서 법니다');
+  
+  // 최대 베팅액과 플레이어의 현재 베팅액 비교
+  const hasPreviousBet = gameState.current_bet_amount > 0;
+  const hasMatchedBet = playerState.current_bet >= gameState.current_bet_amount;
+  
+  if (hasPreviousBet && !hasMatchedBet) {
+    // 이전 사람이 베팅했고, 내가 아직 맞추지 않았을 때: 콜, 레이즈 가능
+    actions.push(BettingAction.CALL);
+    descriptions.push(`콜(Call) - ${gameState.current_bet_amount - playerState.current_bet}원 베팅`);
+    
+    if (playerState.chips > gameState.current_bet_amount - playerState.current_bet) {
+      // 콜보다 더 많은 칩이 있는 경우만 레이즈 가능
+      actions.push(BettingAction.RAISE);
+      descriptions.push(`레이즈(Raise) - 최소 ${gameState.current_bet_amount + blindAmount}원 이상 베팅`);
+    }
+  } else {
+    // 이전 사람이 베팅하지 않았거나, 내가 이미 맞춤: 체크, 레이즈 가능
+    actions.push(BettingAction.CHECK);
+    descriptions.push('체크(Check) - 배팅없이 너김');
+    
+    if (playerState.chips > 0) {
+      actions.push(BettingAction.RAISE);
+      descriptions.push(`레이즈(Raise) - 최소 ${Math.max(gameState.current_bet_amount + blindAmount, blindAmount)}원 이상 베팅`);
+    }
+  }
+  
+  // 올인 옵션 (칩이 있는 경우)
+  if (playerState.chips > 0) {
+    actions.push(BettingAction.ALLIN);
+    descriptions.push(`올인(All-in) - ${playerState.chips}원 베팅`);
+  }
+  
+  return { actions, descriptions };
 }
 
 // bettingApi.ts에서는 중앙화된 gameActionApi의 handleBettingTimeout 함수를 사용합니다.
