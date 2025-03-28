@@ -706,6 +706,7 @@ function transformGameState(gameData: any): GameState {
     game_mode: gameData.mode || 2, // 프론트엔드와 호환성 위해 mode 사용
     betting_end_time: gameData.betting_end_time || null, // 추가된 필드 유지
     cardSelectionTime: gameData.card_selection_time || null, // 추가된 필드
+    bettingRules: gameData.betting_rules || { blind_amount: 100 },
   };
 }
 

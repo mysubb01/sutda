@@ -103,6 +103,14 @@ export type BetActionType =
   | "quarter"; // die -> fold로 변경
 
 /**
+ * 베팅 규칙 인터페이스
+ */
+export interface BettingRules {
+  blind_amount: number;
+  // TODO: 필요시 다른 베팅 규칙 추가 (예: min_raise_amount, max_bet_amount)
+}
+
+/**
  * 게임 상태 인터페이스
  */
 export interface GameState {
@@ -140,6 +148,7 @@ export interface GameState {
 
   cardSelectionTime?: string; // 카드 선택 시간
   deckRemaining?: number; // 남은 덱 카드 수
+  bettingRules: BettingRules; // bettingRules 속성 추가
 }
 
 /**

@@ -4,18 +4,20 @@ import {
   handleGameError,
   ErrorType,
 } from "../utils/errorHandlers";
-import { GameState } from "@/types/game";
+import { Player, BettingRules, GameState } from "@/types";
 
 /**
- * 배팅 관련 액션 타입
+ * 배팅 관련 액션 상수 객체
  */
-export enum BettingAction {
-  CALL = "call",
-  RAISE = "raise",
-  CHECK = "check",
-  FOLD = "fold",
-  ALLIN = "allin",
-}
+export const BETTING_ACTIONS = {
+  CALL: "call",
+  RAISE: "raise",
+  CHECK: "check",
+  FOLD: "fold",
+  ALLIN: "allin",
+} as const;
+
+export type BettingActionValue = typeof BETTING_ACTIONS[keyof typeof BETTING_ACTIONS];
 
 /**
  * 배팅 트랜잭션 인터페이스
@@ -24,7 +26,7 @@ export interface BettingTransaction {
   id: string;
   gameId: string; // DB: game_id (UUID)
   playerId: string; // DB: player_id (UUID)
-  action: BettingAction; // DB: action (enum)
+  action: BettingActionValue; // DB: action (enum)
   amount: number; // DB: amount (integer)
   timestamp: string; // DB: created_at (timestamp)
   round: number; // DB: betting_round (integer)
@@ -51,7 +53,7 @@ export interface BettingResult {
 export async function processBetting(
   gameId: string,
   playerId: string,
-  action: BettingAction,
+  action: BettingActionValue,
   amount: number = 0
 ): Promise<BettingResult> {
   try {
@@ -114,7 +116,7 @@ export async function processBetting(
     let nextAction = "";
 
     switch (action) {
-      case BettingAction.CALL:
+      case BETTING_ACTIONS.CALL:
         // 콜 처리
         if (gameData.current_bet_amount <= 0) {
           throw handleGameError(
@@ -123,7 +125,7 @@ export async function processBetting(
             "현재 베팅이 없을 때는 콜할 수 없습니다. 체크를 사용하세요."
           );
         }
-        
+
         // 현재 플레이어의 베팅액이 최대 베팅액과 같은 경우
         if (playerData.current_bet >= gameData.current_bet_amount) {
           throw handleGameError(
@@ -132,7 +134,7 @@ export async function processBetting(
             "이미 최대 베팅액과 동일합니다. 체크를 사용하세요."
           );
         }
-        
+
         const callAmount = Math.min(
           gameData.current_bet_amount - playerData.current_bet,
           playerData.chips
@@ -142,7 +144,7 @@ export async function processBetting(
         nextAction = "called";
         break;
 
-      case BettingAction.RAISE:
+      case BETTING_ACTIONS.RAISE:
         // 레이즈 처리
         if (amount <= gameData.current_bet_amount) {
           throw handleGameError(
@@ -165,7 +167,7 @@ export async function processBetting(
         nextAction = "raised";
         break;
 
-      case BettingAction.CHECK:
+      case BETTING_ACTIONS.CHECK:
         // 체크 처리
         if (gameData.current_bet_amount > 0 && playerData.current_bet < gameData.current_bet_amount) {
           throw handleGameError(
@@ -177,12 +179,12 @@ export async function processBetting(
         nextAction = "checked";
         break;
 
-      case BettingAction.FOLD:
+      case BETTING_ACTIONS.FOLD:
         // 폴드 처리
         nextAction = "is_die";
         break;
 
-      case BettingAction.ALLIN:
+      case BETTING_ACTIONS.ALLIN:
         // 올인 처리
         const allinAmount = playerData.chips;
         updatedPlayerChips = 0;
@@ -205,7 +207,7 @@ export async function processBetting(
         player_id: playerId, // UUID 형식 사용
         player_name: playerData.username, // 별도로 플레이어 이름 저장
         action_type: action,
-        amount: action === BettingAction.ALLIN ? playerData.balance : amount, // 프론트엔드에서 사용하는 balance 사용
+        amount: action === BETTING_ACTIONS.ALLIN ? playerData.balance : amount, // 프론트엔드에서 사용하는 balance 사용
         betting_round: gameData.betting_round || 1,
         created_at: new Date().toISOString() // timestamp 대신 created_at 사용
       },
@@ -221,9 +223,9 @@ export async function processBetting(
       .update({
         chips: updatedPlayerChips,
         current_bet:
-          action === BettingAction.RAISE
+          action === BETTING_ACTIONS.RAISE
             ? amount
-            : action === BettingAction.CALL
+            : action === BETTING_ACTIONS.CALL
             ? gameData.current_bet_amount
             : playerData.current_bet,
         last_action: action,
@@ -248,7 +250,7 @@ export async function processBetting(
         pot: updatedPot,
         current_turn: nextPlayerId,
         current_bet_amount:
-          action === BettingAction.RAISE ? amount : gameData.current_bet_amount,
+          action === BETTING_ACTIONS.RAISE ? amount : gameData.current_bet_amount,
         last_action: `${playerData.username} ${nextAction} ${
           amount > 0 ? amount + " chips" : ""
         }`,
@@ -649,6 +651,7 @@ function transformGameState(gameData: any): GameState {
     winner: gameData.winner,
     betting_round: gameData.betting_round || 1,
     players: [], // 플레이어 정보는 별도로 로드
+    bettingRules: gameData.bettingRules || { blind_amount: 100 }, // bettingRules 추가 (기본값 포함)
   };
 }
 
@@ -670,57 +673,93 @@ export function createShuffledDeck(): number[] {
 }
 
 /**
- * 현재 게임 상태와 플레이어 상태에 따라 사용 가능한 베팅 액션을 가져옴
- * 
- * @param gameState 현재 게임 상태 데이터
- * @param playerState 현재 플레이어 상태 데이터
- * @param blindAmount 최소 베팅 금액(블라인드)
- * @returns 가능한 베팅 액션 목록
+ * 칩 금액 포맷팅 헬퍼 함수
+ * @param amount 칩 금액
+ * @returns 포맷팅된 칩 금액 문자열
  */
-export function getAvailableBettingActions(gameState: any, playerState: any, blindAmount: number): { 
-  actions: BettingAction[];
-  descriptions: string[];
-} {
-  const actions: BettingAction[] = [];
-  const descriptions: string[] = [];
-  
-  // 폴드는 항상 가능
-  actions.push(BettingAction.FOLD);
-  descriptions.push('폴드(Fold) - 게임에서 법니다');
-  
-  // 최대 베팅액과 플레이어의 현재 베팅액 비교
-  const hasPreviousBet = gameState.current_bet_amount > 0;
-  const hasMatchedBet = playerState.current_bet >= gameState.current_bet_amount;
-  
-  if (hasPreviousBet && !hasMatchedBet) {
-    // 이전 사람이 베팅했고, 내가 아직 맞추지 않았을 때: 콜, 레이즈 가능
-    actions.push(BettingAction.CALL);
-    descriptions.push(`콜(Call) - ${gameState.current_bet_amount - playerState.current_bet}원 베팅`);
-    
-    if (playerState.chips > gameState.current_bet_amount - playerState.current_bet) {
-      // 콜보다 더 많은 칩이 있는 경우만 레이즈 가능
-      actions.push(BettingAction.RAISE);
-      descriptions.push(`레이즈(Raise) - 최소 ${gameState.current_bet_amount + blindAmount}원 이상 베팅`);
-    }
-  } else {
-    // 이전 사람이 베팅하지 않았거나, 내가 이미 맞춤: 체크, 레이즈 가능
-    actions.push(BettingAction.CHECK);
-    descriptions.push('체크(Check) - 배팅없이 너김');
-    
-    if (playerState.chips > 0) {
-      actions.push(BettingAction.RAISE);
-      descriptions.push(`레이즈(Raise) - 최소 ${Math.max(gameState.current_bet_amount + blindAmount, blindAmount)}원 이상 베팅`);
-    }
-  }
-  
-  // 올인 옵션 (칩이 있는 경우)
-  if (playerState.chips > 0) {
-    actions.push(BettingAction.ALLIN);
-    descriptions.push(`올인(All-in) - ${playerState.chips}원 베팅`);
-  }
-  
-  return { actions, descriptions };
+function formatChips(amount: number): string {
+  return amount.toLocaleString(); // 간단한 포맷팅, 필요시 수정
 }
 
-// bettingApi.ts에서는 중앙화된 gameActionApi의 handleBettingTimeout 함수를 사용합니다.
-// 함수 구현을 이 파일에서는 삭제합니다.
+// getAvailableBettingActions 함수의 파라미터 타입을 위한 인터페이스 정의
+export interface GetAvailableActionsParams {
+  gameState: Pick<GameState, "current_bet_amount" | "pot" | "bettingRules">;
+  playerState: Pick<Player, "current_bet" | "chips" | "is_die">; // balance 대신 chips 사용 확인
+}
+
+/**
+ * 현재 게임 및 플레이어 상태에 따라 가능한 베팅 액션 목록과 설명을 반환합니다.
+ * @param params 현재 게임 및 플레이어 상태
+ * @returns 가능한 액션 목록 (actions) 및 각 액션 설명 (descriptions)
+ */
+export function getAvailableBettingActions({
+  gameState,
+  playerState,
+}: GetAvailableActionsParams): {
+  actions: BettingActionValue[];
+  descriptions: { [key in BettingActionValue]?: string };
+} {
+  const { current_bet_amount } = gameState;
+  const { current_bet, chips, is_die } = playerState;
+
+  const actions: BettingActionValue[] = [];
+  const descriptions: { [key in BettingActionValue]?: string } = {};
+
+  if (is_die || chips <= 0) {
+    // 이미 죽었거나 칩이 없으면 아무 액션도 할 수 없음 (이론상 이 함수가 호출되지 않아야 함)
+    return { actions: [], descriptions: {} };
+  }
+
+  const canCheck = current_bet_amount === 0 || current_bet === current_bet_amount;
+  const canCall = current_bet_amount > 0 && current_bet < current_bet_amount && chips > 0;
+  const canRaise = chips > 0; // 레이즈 가능 여부는 더 구체적인 조건 필요
+  const canFold = true; // 항상 폴드 가능
+  const canAllin = chips > 0; // 칩이 있으면 항상 올인 가능 (금액은 보유 칩)
+
+  const callAmount = Math.min(current_bet_amount - current_bet, chips);
+
+  // 체크 (Check)
+  if (canCheck) {
+    actions.push(BETTING_ACTIONS.CHECK);
+    descriptions[BETTING_ACTIONS.CHECK] = "추가 베팅 없이 차례를 넘깁니다.";
+  }
+
+  // 콜 (Call)
+  if (canCall) {
+    actions.push(BETTING_ACTIONS.CALL);
+    descriptions[BETTING_ACTIONS.CALL] = `${formatChips(callAmount)} 칩을 내고 따라갑니다.`;
+  }
+
+  // 폴드 (Fold)
+  if (canFold) {
+    actions.push(BETTING_ACTIONS.FOLD);
+    descriptions[BETTING_ACTIONS.FOLD] = "이번 라운드를 포기합니다.";
+  }
+
+  // 레이즈 (Raise)
+  // 레이즈 가능한 최소 금액 (보통 이전 베팅액의 두 배 또는 최소 베팅 단위)
+  // 여기서는 단순화를 위해 현재 베팅액보다 크고, 보유 칩 내에서 가능하다고 가정
+  // 실제 게임에서는 최소 레이즈 금액 규칙(예: 이전 레이즈 금액만큼 더하기) 필요
+  const minRaiseAmount = current_bet_amount > 0 ? current_bet_amount : (gameState.bettingRules?.minBet || 1); // 최소 레이즈 금액 (예시)
+  if (canRaise && chips > (current_bet_amount - current_bet)) { // 콜 금액보다 칩이 많아야 레이즈 가능
+     // 실제 레이즈 가능 조건은 더 복잡할 수 있음 (예: 최소 레이즈 금액)
+     // 여기서는 단순히 콜 금액 이상의 베팅이 가능하면 레이즈 버튼을 보여줌
+    actions.push(BETTING_ACTIONS.RAISE);
+    descriptions[BETTING_ACTIONS.RAISE] = `최소 ${formatChips(minRaiseAmount + (current_bet_amount - current_bet))} 이상 베팅합니다.`;
+  }
+
+
+  // 올인 (All-in)
+  if (canAllin) {
+    actions.push(BETTING_ACTIONS.ALLIN);
+    descriptions[BETTING_ACTIONS.ALLIN] = `보유한 모든 칩 (${formatChips(chips)})을 베팅합니다.`;
+  }
+
+
+  // 액션 순서 정렬 (예: 체크/콜, 레이즈, 폴드, 올인) - 필요에 따라 조정
+   const actionOrder: BettingActionValue[] = [BETTING_ACTIONS.CHECK, BETTING_ACTIONS.CALL, BETTING_ACTIONS.RAISE, BETTING_ACTIONS.FOLD, BETTING_ACTIONS.ALLIN];
+   actions.sort((a, b) => actionOrder.indexOf(a) - actionOrder.indexOf(b));
+
+
+  return { actions, descriptions };
+}
