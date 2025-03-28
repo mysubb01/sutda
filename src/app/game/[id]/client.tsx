@@ -595,21 +595,27 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
       return;
     }
     
+    console.log('타임아웃 감시 시작 - 현재 플레이어:', gameState.currentTurn);
+    
+    // 타이머 마지막 체크 시간 기록 (2초마다 체크하며 중복 처리 방지)
+    let lastTimeoutCheckTime = 0;
+    let lastProcessedTimeout = '';
+    
     // 타임아웃 처리 함수
     const checkAndHandleTimeout = async () => {
       try {
         // 베팅 종료 시간이 있고, 게임이 플레이 중인 경우에만 체크
-        if (gameState.betting_end_time) {
+        if (gameState && gameState.status === 'playing' && gameState.betting_end_time) {
           const currentTime = new Date().getTime();
           const bettingEndTime = new Date(gameState.betting_end_time).getTime();
           
-          // 현재 턴 플레이어 ID 확인 (API와 호환성 유지)
+          // 현재 턴 플레이어 ID 확인
           const currentPlayerTurn = gameState.currentTurn || '';
+          const timeoutKey = `${gameId}_${currentPlayerTurn}_${gameState.betting_end_time}`;
           
           // 디버깅용 로그
           const remainingSeconds = Math.floor((bettingEndTime - currentTime) / 1000);
           
-          // 로그 수준 조정 - 매 초마다 로그가 너무 많이 찍히지 않도록
           if (remainingSeconds <= 5 || remainingSeconds % 5 === 0) {
             console.log('타임아웃 체크:', {
               현재시간: new Date(currentTime).toLocaleString(),
@@ -620,71 +626,104 @@ export default function ClientGamePage({ gameId }: ClientGamePageProps) {
             });
           }
           
-          // 베팅 시간이 초과된 경우 서버에 타임아웃 처리 요청
-          if (currentTime > bettingEndTime) {
-            console.log('🔴 베팅 시간 초과 감지');
-            console.log(`타임아웃 처리 요청 - 게임ID: ${gameId}, 현재턴: ${currentPlayerTurn || '알 수 없음'}`);
+          // 베팅 시간이 초과되고 마지막 처리 후 충분한 시간이 지났을 때만 실행 (2초)
+          const timeElapsedSinceLastCheck = currentTime - lastTimeoutCheckTime;
+          if (currentTime > bettingEndTime && 
+              timeElapsedSinceLastCheck > 2000 && 
+              lastProcessedTimeout !== timeoutKey) {
+            
+            console.log('홈 베팅 시간 초과 감지');
+            console.log(`타임아웃 처리 요청 - 게임ID: ${gameId}, 현재턴: ${currentPlayerTurn}`);
+            
+            // 중복 처리 방지를 위해 현재 처리 중인 타임아웃 기록
+            lastTimeoutCheckTime = currentTime;
+            lastProcessedTimeout = timeoutKey;
             
             if (!currentPlayerTurn) {
               console.error('현재 턴 플레이어 ID가 없어 타임아웃 처리를 중단합니다.');
               return;
             }
             
-            // 현재 턴 플레이어의 타임아웃 처리 요청
             try {
-              console.log(`handleBettingTimeout API 호출 시작 - ${new Date().toLocaleString()}`);
+              // 위잫 표시를 위한 구분자
+              console.log('\n홈홈홈홈홈홈홈홈홈홈홈홈홈홈홈홈홈홈홈홈홈홈홈홈홈홈');
+              console.log(`타임아웃 처리 시작 - 플레이어: ${currentPlayerTurn}`);
+              console.log('\n');
+              
+              // 타임아웃 API 호출
               const result = await handleBettingTimeout(gameId, currentPlayerTurn);
-              console.log(`handleBettingTimeout API 호출 완료 - ${new Date().toLocaleString()}`);
-              console.log('타임아웃 처리 결과:', result);
+              console.log(`\n타임아웃 API 호출 결과:`, result);
               
               if (result.success) {
-                console.log('🟢 타임아웃 처리 성공');
+                console.log('홈 타임아웃 처리 성공');
                 
-                // 즉시 게임 상태 다시 불러오기 (다양한 시간대에 여러번 새로고침)
-                fetchGameState();
+                // 즉시 게임 상태 다시 불러오기
                 console.log('타임아웃 처리 후 즉시 게임 상태 새로고침');
+                await fetchGameState();
                 
-                // 여러 번의 상태 갱신을 통해 UI가 완전히 갱신되도록 함
-                const intervals = [500, 1000, 2000, 3000];
-                intervals.forEach(delay => {
-                  setTimeout(() => {
-                    fetchGameState();
-                    console.log(`타임아웃 처리 후 ${delay}ms 게임 상태 갱신`);
+                // 안정적인 상태 갱신을 위해 여러 번 새로고침 (지정된 시간 후)
+                const intervals = [500, 1500, 3000, 5000];
+                for (const delay of intervals) {
+                  setTimeout(async () => {
+                    console.log(`타임아웃 처리 후 ${delay}ms 게임 상태 강제 새로고침`);
+                    await fetchGameState();
                   }, delay);
-                });
+                }
               } else {
-                console.error('🔴 타임아웃 처리 실패:', result.error);
+                console.error('홈 타임아웃 처리 실패:', result.error);
                 
-                // 실패했지만 게임 상태 다시 불러오기
-                setTimeout(() => {
-                  fetchGameState();
-                  console.log('타임아웃 처리 실패 후 게임 상태 갱신');
-                }, 1000);
+                // 실패 시 3초 후 재시도
+                setTimeout(async () => {
+                  console.log('타임아웃 처리 실패 - 3초 후 재시도');
+                  try {
+                    const retryResult = await handleBettingTimeout(gameId, currentPlayerTurn);
+                    console.log('재시도 결과:', retryResult);
+                    
+                    // 성공 시 게임 상태 갱신
+                    if (retryResult.success) {
+                      console.log('타임아웃 재시도 성공 - 게임 상태 갱신');
+                      await fetchGameState();
+                    }
+                  } catch (retryError) {
+                    console.error('타임아웃 재시도 중 오류:', retryError);
+                  }
+                }, 3000);
               }
+              
+              console.log('\n홈홈홈홈홈홈홈홈홈홈홈홈홈홈홈홈홈홈홈홈홈홈홈홈홈홈');
             } catch (apiError) {
               console.error('타임아웃 API 호출 중 오류:', apiError);
               
-              // API 오류 발생 시 재시도
-              setTimeout(() => {
-                fetchGameState();
-                console.log('API 오류 후 게임 상태 갱신');
-              }, 1000);
+              // 오류 발생 시 3초 후 게임 상태 강제 새로고침
+              setTimeout(async () => {
+                console.log('API 오류 후 게임 상태 강제 새로고침');
+                await fetchGameState();
+              }, 3000);
             }
           }
         }
       } catch (err) {
-        console.error('타임아웃 체크 중 오류:', err);
+        console.error('타임아웃 체크 중 예외 발생:', err);
+        
+        // 오류 발생 시에도 게임 상태 새로고침
+        setTimeout(async () => {
+          console.log('오류 후 게임 상태 강제 새로고침');
+          await fetchGameState();
+        }, 2000);
       }
     };
     
     // 최초 실행
     checkAndHandleTimeout();
     
-    // 정기적 체크 (2초마다) - 더 빠른 감지를 위해 간격 줄임
-    const checkTimeoutInterval = setInterval(checkAndHandleTimeout, 2000);
+    // 정기적 체크 (1초마다) - 더 빠른 감지를 위해 간격 줄임
+    const checkTimeoutInterval = setInterval(checkAndHandleTimeout, 1000);
+    
+    console.log('타임아웃 감시 설정 완료 - 간격: 1초');
     
     return () => {
       clearInterval(checkTimeoutInterval);
+      console.log('타임아웃 감시 종료');
     };
   }, [gameId, gameState, fetchGameState]);
   

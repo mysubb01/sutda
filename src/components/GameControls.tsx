@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Image from 'next/image';
 import { GameState, BetActionType } from '@/types/game';
 import { startGame, placeBet } from '@/lib/gameApi';
 import soundPlayer from '@/utils/soundEffects';
 import { toast } from 'react-hot-toast';
+import { getAvailableBettingActions, BettingAction } from '@/lib/api/bettingApi';
 
 interface GameControlsProps {
   gameState: GameState;
@@ -18,12 +19,14 @@ const BettingButton = ({
   label, 
   onClick, 
   disabled = false,
-  variant = 'default' 
+  variant = 'default',
+  title = ''
 }: { 
   label: string; 
   onClick: () => void; 
   disabled?: boolean;
-  variant?: 'default' | 'primary' | 'success' | 'danger' | 'warning'
+  variant?: 'default' | 'primary' | 'success' | 'danger' | 'warning';
+  title?: string;
 }) => {
   // 버튼 스타일링을 위한 함수
   const getButtonStyle = () => {
@@ -46,6 +49,7 @@ const BettingButton = ({
       className={`relative h-12 rounded-md shadow-md ${getButtonStyle()} ${disabled ? 'opacity-50 cursor-not-allowed' : 'transform hover:scale-105 transition-transform'} font-bold`}
       onClick={onClick}
       disabled={disabled}
+      title={title}
     >
       <span className="text-white font-bold text-sm">{label}</span>
     </button>
@@ -124,7 +128,7 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
         throw new Error('유효하지 않은 베팅 금액입니다.');
       }
       
-      await placeBet(gameState.id, currentPlayerId, 'bet', betValue);
+      await placeBet(gameState.id, currentPlayerId, 'raise', betValue);
       // 일반 베팅 사운드 재생
       soundPlayer.play('call');
       onAction();
@@ -164,7 +168,8 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
     setError(null);
     
     try {
-      await placeBet(gameState.id, currentPlayerId, 'die');
+      // 'die' 대신 'fold' 사용
+      await placeBet(gameState.id, currentPlayerId, 'fold');
       // 다이 사운드 재생
       soundPlayer.play('die');
       onAction();
@@ -296,7 +301,7 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
         throw new Error('유효하지 않은 베팅 금액입니다.');
       }
       
-      await placeBet(gameState.id, currentPlayerId, 'bet', betValue);
+      await placeBet(gameState.id, currentPlayerId, 'raise', betValue);
       // 삥 사운드 재생
       soundPlayer.play('ping');
       onAction();
@@ -308,10 +313,35 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
     }
   };
 
+  // 사용 가능한 베팅 액션 목록 가져오기
+  const availableBettingActions = useMemo(() => {
+    if (!currentPlayer || !gameState) return { actions: [], descriptions: [] };
+    
+    // 현재 게임 상태와 플레이어 상태를 기반으로 사용 가능한 액션 목록 가져오기
+    const blindAmount = 100; // 최소 베팅 금액 (블라인드)
+    return getAvailableBettingActions({
+      current_bet_amount: gameState.bettingValue || 0
+    }, {
+      current_bet: currentPlayer.current_bet || 0,
+      chips: currentPlayer.balance || 0
+    }, blindAmount);
+  }, [gameState, currentPlayer]);
+  
   // 이전 베팅이 있는지 확인
   const hasPreviousBet = (): boolean => {
     // 게임 베팅값이 0보다 크면 이전 베팅이 있는 것
     return gameState.bettingValue > 0;
+  };
+  
+  // 특정 액션이 가능한지 확인
+  const isActionAvailable = (action: BettingAction): boolean => {
+    return availableBettingActions.actions.includes(action);
+  };
+  
+  // 액션 설명 가져오기
+  const getActionDescription = (action: BettingAction): string => {
+    const index = availableBettingActions.actions.indexOf(action);
+    return index >= 0 ? availableBettingActions.descriptions[index] : '';
   };
 
   if (isGameFinished) {
@@ -469,60 +499,76 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
             {/* 배팅 버튼 */}
             <div className="grid grid-cols-3 gap-2 mt-2">
               {/* 첫 번째 줄 */}
-              {!hasPreviousBet() && (
+              {isActionAvailable(BettingAction.CHECK) && (
                 <BettingButton
                   label="체크"
                   onClick={handleCheck}
                   disabled={isLoading}
                   variant="success"
+                  title={getActionDescription(BettingAction.CHECK)}
                 />
               )}
               
-              {hasPreviousBet() && (
+              {isActionAvailable(BettingAction.CALL) && (
                 <BettingButton
                   label="콜"
                   onClick={handleCall}
                   disabled={isLoading}
                   variant="primary"
+                  title={getActionDescription(BettingAction.CALL)}
                 />
               )}
               
-              <BettingButton
-                label="하프"
-                onClick={handleHalf}
-                disabled={isLoading || (currentPlayer?.balance || 0) < Math.floor(gameState.bettingValue / 2)}
-                variant="warning"
-              />
+              {isActionAvailable(BettingAction.RAISE) && (
+                <BettingButton
+                  label="하프"
+                  onClick={handleHalf}
+                  disabled={isLoading || (currentPlayer?.balance || 0) < Math.floor(gameState.bettingValue / 2)}
+                  variant="warning"
+                  title="현재 베팅의 절반 금액을 베팅합니다"
+                />
+              )}
               
-              <BettingButton
-                label="따당"
-                onClick={handleDouble}
-                disabled={isLoading || (currentPlayer?.balance || 0) < gameState.bettingValue * 2}
-                variant="danger"
-              />
+              {isActionAvailable(BettingAction.RAISE) && (
+                <BettingButton
+                  label="따당"
+                  onClick={handleDouble}
+                  disabled={isLoading || (currentPlayer?.balance || 0) < gameState.bettingValue * 2}
+                  variant="danger"
+                  title="현재 베팅의 2배 금액을 베팅합니다"
+                />
+              )}
               
               {/* 두 번째 줄 */}
-              <BettingButton
-                label="삥"
-                onClick={handlePing}
-                disabled={isLoading || (currentPlayer?.balance || 0) < gameState.bettingValue}
-                variant="primary"
-              />
+              {isActionAvailable(BettingAction.RAISE) && (
+                <BettingButton
+                  label="삭"
+                  onClick={handlePing}
+                  disabled={isLoading || (currentPlayer?.balance || 0) < gameState.bettingValue}
+                  variant="primary"
+                  title="현재 베팅과 같은 금액을 베팅합니다"
+                />
+              )}
               
-              <BettingButton
-                label="쿼터"
-                onClick={handleQuarter}
-                disabled={isLoading || Math.floor(gameState.bettingValue / 4) <= 0 || (currentPlayer?.balance || 0) < Math.floor(gameState.bettingValue / 4)}
-                variant="success"
-              />
+              {isActionAvailable(BettingAction.RAISE) && (
+                <BettingButton
+                  label="쿼터"
+                  onClick={handleQuarter}
+                  disabled={isLoading || Math.floor(gameState.bettingValue / 4) <= 0 || (currentPlayer?.balance || 0) < Math.floor(gameState.bettingValue / 4)}
+                  variant="success"
+                  title="현재 베팅의 1/4 금액을 베팅합니다"
+                />
+              )}
               
-              <button
-                className={`bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded shadow ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                onClick={() => handleDie()}
-                disabled={isLoading || currentPlayer?.is_die}
-              >
-                다이
-              </button>
+              {isActionAvailable(BettingAction.FOLD) && (
+                <BettingButton
+                  label="다이"
+                  onClick={handleDie}
+                  disabled={isLoading || currentPlayer?.is_die}
+                  variant="danger"
+                  title="게임에서 포기합니다"
+                />
+              )}
             </div>
           </div>
         ) : (
@@ -533,13 +579,13 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
             
             <div className="flex justify-end">
               <div className="w-1/2">
-                <button
-                  className={`bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded shadow ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  onClick={() => handleDie()}
+                <BettingButton
+                  label="다이 (포기)"
+                  onClick={handleDie}
                   disabled={isLoading || currentPlayer?.is_die}
-                >
-                  다이 (포기)
-                </button>
+                  variant="danger"
+                  title="게임에서 포기합니다"
+                />
               </div>
             </div>
           </div>
