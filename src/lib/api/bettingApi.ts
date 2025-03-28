@@ -234,7 +234,7 @@ export async function processBetting(
       .from("games")
       .update({
         pot: updatedPot,
-        current_player_id: nextPlayerId,
+        current_turn: nextPlayerId,
         current_bet_amount:
           action === BettingAction.RAISE ? amount : gameData.current_bet_amount,
         last_action: `${playerData.username} ${nextAction} ${
@@ -550,7 +550,7 @@ export async function dealNewRound(gameId: string): Promise<void> {
       const { error: updateGameError } = await supabase
         .from("games")
         .update({
-          current_player_id: players[0].id,
+          current_turn: players[0].id,
         })
         .eq("id", gameId);
 
@@ -658,30 +658,5 @@ export function createShuffledDeck(): number[] {
   return cards;
 }
 
-/**
- * 베팅 타임아웃 처리
- * 현재 플레이어가 일정 시간 내에 베팅을 하지 않으면 자동으로 폴드 처리
- *
- * @param gameId 게임 ID
- * @param playerId 현재 플레이어 ID
- * @returns 처리 결과
- */
-export async function handleBettingTimeout(
-  gameId: string,
-  playerId: string
-): Promise<void> {
-  console.log(
-    `[handleBettingTimeout] Processing timeout for player ${playerId} in game ${gameId}`
-  );
-
-  try {
-    // 타임아웃 발생시 자동 폴드 처리
-    await processBetting(gameId, playerId, BettingAction.FOLD, 0);
-    console.log(
-      `[handleBettingTimeout] Auto-is_die player ${playerId} due to timeout`
-    );
-  } catch (error) {
-    console.error(`[handleBettingTimeout] Error processing timeout:`, error);
-    throw error;
-  }
-}
+// bettingApi.ts에서는 중앙화된 gameActionApi의 handleBettingTimeout 함수를 사용합니다.
+// 함수 구현을 이 파일에서는 삭제합니다.

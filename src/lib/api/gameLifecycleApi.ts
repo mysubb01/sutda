@@ -94,7 +94,7 @@ export async function startDebugGame(gameId: string): Promise<void> {
       .from('games')
       .update({
         status: 'playing', // 중요: 게임 상태를 'playing'으로 명시적 설정
-        current_player_id: startPlayerId,
+        current_turn: startPlayerId,
         show_cards: false,
         current_bet_amount: baseBet,
         pot: baseBet * playersData.length,
@@ -242,8 +242,7 @@ export async function startGame(gameId: string, playerId?: string): Promise<{ su
       .from('games')
       .update({
         status: 'playing',
-        current_turn: startPlayerId, // current_turn 필드 사용
-        current_player_id: startPlayerId, // 프론트엔드 호환성 위해 current_player_id 사용
+        current_turn: startPlayerId, // 통합된 필드 사용
         betting_value: baseBet, // 베팅값 필드
         total_pot: baseBet * playersData.length, // 총 팟
         pot: baseBet * playersData.length, // 총 팟 (total_pot과 동일하지만 호환성 위해)
@@ -461,7 +460,7 @@ export async function handleRegame(gameId: string): Promise<void> {
       .from('games')
       .update({
         status: 'waiting',
-        current_player_id: null,
+        current_turn: null,
         show_cards: false,
         current_bet_amount: 0, // betting_value -> current_bet_amount
         pot: 0, // total_pot -> pot
@@ -544,7 +543,6 @@ export async function cleanupAfterGameFinish(gameId: string): Promise<void> {
       .from('games')
       .update({
         status: 'waiting',
-        current_player_id: null,
         current_turn: null,
         winner: null,
         show_cards: false,

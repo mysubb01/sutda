@@ -11,3 +11,7 @@ export * from './api/gameBettingApi';
 export * from './api/gameCardApi';
 export * from './api/messageApi';
 export * from './api/seatApi';
+
+// handleBettingTimeout 함수만 명시적으로 내보내기 (이름 충돌 해결)
+import { handleBettingTimeout } from './api/gameActionApi';
+export { handleBettingTimeout };

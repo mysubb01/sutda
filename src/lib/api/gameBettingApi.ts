@@ -1,7 +1,7 @@
 import { supabase } from '../supabaseClient';
 import { handleDatabaseError, handleGameError, handleResourceNotFoundError, ErrorType } from '../utils/errorHandlers';
 import { BetActionType, Player } from '@/types/game';
-import { getNextPlayerTurn } from './gameActionApi';
+import { getNextPlayerTurn, handleBettingTimeout } from './gameActionApi';
 import { logBettingAction, logSystemError, logInfo } from '../logService';
 
 /**
@@ -211,8 +211,9 @@ export async function betAction(
       );
     }
     
-    // 현재 플레이어 턴인지 확인 (current_player_id -> current_turn으로 변경)
+    // 현재 플레이어 턴인지 확인
     if (game.current_turn !== playerId) {
+      console.log(`[betAction] 현재 턴 오류: 현재 턴=${game.current_turn}, 플레이어=${playerId}`);
       throw handleGameError(
         new Error('현재 턴이 아닙니다'),
         ErrorType.UNAUTHORIZED,
@@ -456,7 +457,7 @@ export async function betAction(
     interface GameUpdate {
       total_pot?: number;
       betting_value?: number;
-      current_turn?: string;
+      current_turn?: string; // current_turn으로 통합
       last_action?: string;
       updated_at?: string;
       betting_end_time?: string; // 추가된 필드
@@ -477,7 +478,8 @@ export async function betAction(
     
     // 다음 플레이어 결정
     const nextPlayerId = await getNextPlayerTurn(gameId, playerId);
-    gameUpdate.current_turn = nextPlayerId || undefined;  // current_player_id -> current_turn 으로 변경
+    console.log(`[betAction] 다음 플레이어 결정: ${nextPlayerId || '없음'}`);
+    gameUpdate.current_turn = nextPlayerId || undefined;  // current_turn 사용
     gameUpdate.last_action = `${currentPlayer.username} ${actionDescription}`;
     gameUpdate.updated_at = new Date().toISOString();
     
@@ -495,7 +497,7 @@ export async function betAction(
       {
         game_id: gameId,
         player_id: playerId,
-        player_name: currentPlayer.username, // 추가된 필드
+        // player_name 필드 제거 - 데이터베이스에 해당 컬럼이 없음
         action_type: action,
         amount: betAmount,
         betting_round: game.betting_round || 1,
@@ -540,153 +542,8 @@ export async function betAction(
   }
 }
 
-/**
- * 베팅 타임아웃 처리
- */
-export async function handleBettingTimeout(gameId: string, playerId?: string): Promise<{ success: boolean; error?: string }> {
-  try {
-    // 게임 상태 확인 (current_player_id 대신 current_turn 사용)
-    const { data: game, error: gameError } = await supabase
-      .from('games')
-      .select('status, current_turn')
-      .eq('id', gameId)
-      .single();
-    
-    if (gameError) {
-      throw handleDatabaseError(gameError, '게임 정보 조회 실패');
-    }
-    
-    if (!game) {
-      throw handleGameError(
-        new Error('게임을 찾을 수 없습니다'), 
-        ErrorType.NOT_FOUND, 
-        '게임을 찾을 수 없습니다'
-      );
-    }
-    
-    // playerId가 제공되지 않은 경우 현재 플레이어 ID 사용 (current_turn 사용)
-    const currentPlayerId = playerId || game.current_turn;
-    if (!currentPlayerId) {
-      throw handleGameError(
-        new Error('현재 플레이어 ID를 찾을 수 없습니다'), 
-        ErrorType.NOT_FOUND, 
-        '현재 플레이어 ID를 찾을 수 없습니다'
-      );
-    }
-    
-    // 게임이 진행 중이 아니면 처리하지 않음
-    if (game.status !== 'playing') {
-      return { 
-        success: false,
-        error: '게임이 진행 중이 아닙니다'
-      };
-    }
-    
-    // 현재 턴이 해당 플레이어의 턴인지 확인 (current_turn 사용)
-    if (game.current_turn !== playerId) {
-      return {
-        success: false,
-        error: '해당 플레이어의 턴이 아닙니다'
-      };
-    }
-    
-    // 플레이어 정보 조회
-    const { data: player, error: playerError } = await supabase
-      .from('players')
-      .select('username')
-      .eq('id', playerId)
-      .single();
-    
-    if (playerError) {
-      throw handleDatabaseError(playerError, '플레이어 정보 조회 실패');
-    }
-    
-    if (!player) {
-      throw handleGameError(
-        new Error('플레이어를 찾을 수 없습니다'), 
-        ErrorType.NOT_FOUND, 
-        '플레이어를 찾을 수 없습니다'
-      );
-    }
-    
-    // 자동 폴드 처리
-    const { error: updatePlayerError } = await supabase
-      .from('players')
-      .update({
-        is_die: true, // folded -> is_die로 변경
-        last_action: 'fold',
-        last_action_time: new Date().toISOString(),
-        last_heartbeat: new Date().toISOString() // 추가된 필드
-      })
-      .eq('id', playerId);
-    
-    if (updatePlayerError) {
-      throw handleDatabaseError(updatePlayerError, '플레이어 상태 업데이트 실패');
-    }
-    
-    // 다음 플레이어 결정
-    // 다음 플레이어 결정 - 환경에 따라 null이나 undefined가 될 수 있음
-    const nextPlayerResult = await getNextPlayerTurn(gameId, currentPlayerId);
-    
-    // 게임 상태 업데이트 (current_player_id -> current_turn으로 변경)
-    const { error: updateGameError } = await supabase
-      .from('games')
-      .update({
-        current_turn: nextPlayerResult,
-        last_action: `${player.username} 시간 초과로 폴드`
-      })
-      .eq('id', gameId);
-    
-    if (updateGameError) {
-      throw handleDatabaseError(updateGameError, '게임 상태 업데이트 실패');
-    }
-    
-    // 알림 메시지 기록 - 🔐 타입 안전성을 위해 방법 변경
-    try {
-      const logMessage = `${player.username}님이 시간 초과로 자동 폴드되었습니다.`;
-      const logData = {
-        reason: 'timeout',
-        message: logMessage,
-        // nextPlayer 메타데이터를 제거하고 logInfo로 직접 처리
-      };
-      await logInfo(gameId, 'betting', logMessage, playerId, { ...logData, action: 'fold' });
-    } catch (logError) {
-      console.error('로그 기록 중 오류:', logError);
-      // 로그 오류는 있어도 게임 진행에 영향을 주지 않음
-    }
-    
-    // 라운드 완료 여부 확인
-    // 모든 플레이어 정보 조회
-    const { data: allPlayers, error: allPlayersError } = await supabase
-      .from('players')
-      .select('*')
-      .eq('game_id', gameId);
-    
-    if (allPlayersError) {
-      throw handleDatabaseError(allPlayersError, 'handleBettingTimeout: all players');
-    }
-    
-    const activePlayers = allPlayers.filter(p => !p.is_die);
-    
-    if (activePlayers.length <= 1) {
-      await finishBettingRound(gameId);
-    }
-    
-    return { success: true };
-  } catch (error: any) {
-    console.error('베팅 타임아웃 처리 중 오류:', error);
-    await logSystemError(gameId, 'handleBettingTimeout', error);
-    
-    if (error.name === 'GameError') {
-      return {
-        success: false,
-        error: error.message
-      };
-    }
-    
-    return {
-      success: false,
-      error: '베팅 타임아웃 처리 중 오류가 발생했습니다.'
-    };
-  }
-}
+// gameBettingApi.ts에서는 중앙화된 gameActionApi의 handleBettingTimeout 함수를 사용합니다.
+// 함수 구현을 이 파일에서는 삭제하고 가져오기만 합니다.
+
+// gameActionApi의 handleBettingTimeout 함수를 재내보내기
+export { handleBettingTimeout };

@@ -26,8 +26,8 @@ import * as gameCardFunctions from './gameCardApi';
 export { gameCardFunctions };
 
 // 베팅 관련 함수
-import { BettingAction, processBetting, handleBettingTimeout } from './bettingApi';
-export { BettingAction, processBetting, handleBettingTimeout };
+import { BettingAction, processBetting } from './bettingApi';
+export { BettingAction, processBetting };
 import * as gameBettingFunctions from './gameBettingApi';
 export { gameBettingFunctions };
 
@@ -36,9 +36,10 @@ import {
   canStartGame,
   isRoomOwner,
   toggleReady,
-  getNextPlayerTurn
+  getNextPlayerTurn,
+  handleBettingTimeout
 } from './gameActionApi';
-export { canStartGame, isRoomOwner, toggleReady, getNextPlayerTurn };
+export { canStartGame, isRoomOwner, toggleReady, getNextPlayerTurn, handleBettingTimeout };
 
 // 게임 룸 관련 함수
 import { joinGame } from './gameRoomApi';

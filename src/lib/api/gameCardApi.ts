@@ -1,6 +1,6 @@
 import { supabase } from '../supabaseClient';
 import { handleDatabaseError, handleGameError, handleResourceNotFoundError, ErrorType } from '../utils/errorHandlers';
-import { logCardAction, logSystemError } from '../logService';
+import { logCardAction, logSystemError, logInfo } from '../logService';
 import { findBestCombination } from '../../utils/gameLogic';
 
 /**
@@ -123,10 +123,13 @@ export async function selectFinalCards(
     }
     
     // 로그 기록
-    await logCardAction(gameId, playerId, 'select_cards', {
-      selected: selectedCards,
-      all_cards: allCards
-    });
+    await logInfo(
+      gameId,
+      'cards',
+      `카드 액션: ${playerId}의 select_cards`,
+      playerId,
+      { action: 'select_cards', selectedCards, allCards }
+    );
     
     // 모든 플레이어가 카드를 선택했는지 확인
     const { data: allPlayers, error: allPlayersError } = await supabase

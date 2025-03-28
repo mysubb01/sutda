@@ -592,13 +592,18 @@ export function GameTable({
                         return;
                       }
                       
-                      await import('@/lib/gameApi').then(async ({ placeBet }) => {
+                      await import('@/lib/gameApi').then(async ({ handleBettingTimeout }) => {
                         try {
-                          await placeBet(gameId, currentPlayerId, 'fold');
-                          console.log('시간 초과로 인한 자동 폴드 처리 완료');
-                          toast.success('시간 초과로 자동 폴드 처리되었습니다.');
+                          const result = await handleBettingTimeout(gameId, currentPlayerId);
+                          if (result.success) {
+                            console.log('시간 초과 처리 완료');
+                            toast.success('시간 초과로 자동 폴드 처리되었습니다.');
+                          } else {
+                            console.error('시간 초과 처리 오류:', result.error);
+                            toast.error(`시간 초과 처리 중 오류: ${result.error || '알 수 없는 오류'}`);
+                          }
                         } catch (betError: any) {
-                          console.error('폴드 처리 오류:', betError);
+                          console.error('타임아웃 처리 오류:', betError);
                           toast.error('폴드 처리 중 오류가 발생했습니다.');
                         }
                       });

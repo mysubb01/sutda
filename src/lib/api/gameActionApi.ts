@@ -131,7 +131,7 @@ export async function startGame(
       .from("games")
       .update({
         status: GameStatus.PLAYING,
-        current_player_id: firstPlayerId, // 프론트엔드의 실제 사용에 맞춰 current_player_id 사용
+        current_turn: firstPlayerId, // 통합된 current_turn 필드 사용
         current_bet_amount: 0,
         pot: 0, // 프론트엔드와 호환성 위해 pot 사용
         round: 1, // 프론트엔드와 호환성 위해 round 사용
@@ -365,10 +365,10 @@ export async function handleBettingTimeout(
       } in game ${gameId}`
     );
 
-    // 게임 상태 확인
+    // 트랜잭션 시작 - 턴 전환을 원자적으로 처리하기 위해
     const { data: game, error: gameError } = await supabase
       .from("games")
-      .select("status, current_player_id")
+      .select("status, current_turn, betting_end_time")
       .eq("id", gameId)
       .single();
 
@@ -385,7 +385,7 @@ export async function handleBettingTimeout(
     }
 
     // playerId가 제공되지 않은 경우 현재 플레이어 ID 사용
-    const currentPlayerId = playerId || game.current_player_id;
+    const currentPlayerId = playerId || game.current_turn;
     if (!currentPlayerId) {
       throw handleGameError(
         new Error("현재 플레이어 ID를 찾을 수 없습니다"),
@@ -403,18 +403,20 @@ export async function handleBettingTimeout(
     }
 
     // 현재 턴이 해당 플레이어의 턴인지 확인
-    if (game.current_player_id !== playerId) {
+    if (game.current_turn !== currentPlayerId) {
       return {
         success: false,
         error: "해당 플레이어의 턴이 아닙니다",
       };
     }
 
+    console.log(`[handleBettingTimeout] 유효한 타임아웃 확인: currentPlayerId=${currentPlayerId}, game.current_turn=${game.current_turn}`);
+
     // 플레이어 정보 조회
     const { data: player, error: playerError } = await supabase
       .from("players")
-      .select("username")
-      .eq("id", playerId)
+      .select("username, is_die")
+      .eq("id", currentPlayerId)
       .single();
 
     if (playerError) {
@@ -429,15 +431,35 @@ export async function handleBettingTimeout(
       );
     }
 
+    // 이미 폴드된 플레이어라면 중복 처리하지 않음
+    if (player.is_die) {
+      console.log(`[handleBettingTimeout] 플레이어 ${currentPlayerId}는 이미 폴드 상태입니다`);
+      // 다음 플레이어로 턴 넘김
+      const nextPlayerId = await getNextPlayerTurn(gameId, currentPlayerId);
+      if (nextPlayerId) {
+        // 게임 상태 업데이트: 다음 플레이어로 턴 넘김
+        await supabase
+          .from("games")
+          .update({
+            current_turn: nextPlayerId,
+            betting_end_time: new Date(Date.now() + 35000).toISOString(), // 타이머 35초로 설정 (여유있게)
+          })
+          .eq("id", gameId);
+        console.log(`[handleBettingTimeout] 이미 폴드된 플레이어의 다음 턴으로 넘김: nextPlayerId=${nextPlayerId}`);
+      }
+      return { success: true };
+    }
+
     // 자동 폴드 처리 (is_die로 통일)
     const { error: updatePlayerError } = await supabase
       .from("players")
       .update({
         is_die: true,
+        has_acted: true, // 플레이어가 액션을 취했음을 표시
         last_action: "fold",
         last_action_time: new Date().toISOString(),
       })
-      .eq("id", playerId);
+      .eq("id", currentPlayerId);
 
     if (updatePlayerError) {
       throw handleDatabaseError(
@@ -445,18 +467,24 @@ export async function handleBettingTimeout(
         "플레이어 상태 업데이트 실패"
       );
     }
+    
+    console.log(`[handleBettingTimeout] 플레이어 ${currentPlayerId} 자동 폴드 처리 완료 (is_die=true, has_acted=true)`);
 
     // 다음 플레이어 결정
     const nextPlayerId = await getNextPlayerTurn(gameId, currentPlayerId);
+    console.log(`[handleBettingTimeout] 다음 플레이어 ID: ${nextPlayerId || '없음'}`);
 
-    // 게임 상태 업데이트
+    // 게임 상태 업데이트 - 타이머 시간을 35초로 늘려 시간 초과 문제 방지
     const { error: updateGameError } = await supabase
       .from("games")
       .update({
-        current_player_id: nextPlayerId,
+        current_turn: nextPlayerId,
         last_action: `${player.username} 시간 초과로 폴드`,
+        betting_end_time: nextPlayerId ? new Date(Date.now() + 35000).toISOString() : null, // 타이머 35초로 설정
       })
       .eq("id", gameId);
+      
+    console.log(`[handleBettingTimeout] 게임 상태 업데이트: nextPlayerId=${nextPlayerId}, gameId=${gameId}`);
 
     if (updateGameError) {
       throw handleDatabaseError(updateGameError, "게임 상태 업데이트 실패");
@@ -615,7 +643,7 @@ function transformGameState(gameData: any): GameState {
     status: gameData.status,
     totalPot: gameData.pot || 0, // 프론트엔드와 호환성 위해 pot 사용
     bettingValue: gameData.current_bet_amount || 0,
-    currentTurn: gameData.current_player_id || null, // 프론트엔드 호환성 위해 current_player_id 사용
+    currentTurn: gameData.current_turn || null, // 통합된 current_turn 필드 사용
     lastAction: gameData.last_action,
     winner: null,
     players: [], // 플레이어 정보는 별도로 로드
@@ -641,14 +669,14 @@ export async function getNextPlayerTurn(
   try {
     console.log(`[getNextPlayerTurn] 다음 턴 찾기 시작: gameId=${gameId}, currentPlayerId=${currentPlayerId}`);
     
-    // 현재 게임의 활성 플레이어 목록 조회 - is_playing 필터 제거
+    // 현재 게임의 활성 플레이어 목록 조회
     const { data: players, error } = await supabase
       .from("players")
       .select("id, seat_index, is_die, balance")
       .eq("game_id", gameId)
       .order("seat_index", { ascending: true });
 
-    console.log(`[getNextPlayerTurn] 조회된 플레이어:`, players);
+    console.log(`[getNextPlayerTurn] 조회된 플레이어:`, players?.length || 0, '번');
 
     if (error || !players || players.length === 0) {
       console.error("[getNextPlayerTurn] Error retrieving players:", error);
@@ -657,9 +685,10 @@ export async function getNextPlayerTurn(
 
     // 다이하지 않고 잔액이 있는 플레이어만 필터링
     const activePlayers = players.filter((p) => !p.is_die && p.balance > 0);
-    console.log(`[getNextPlayerTurn] 활성 플레이어:`, activePlayers);
+    console.log(`[getNextPlayerTurn] 활성 플레이어:`, activePlayers.length, '번, 상태:', activePlayers.map(p => `ID:${p.id.substring(0,6)}, is_die:${p.is_die}`));
 
     if (activePlayers.length <= 1) {
+      console.log(`[getNextPlayerTurn] 활성 플레이어가 한 명 이하로 다음 플레이어 없음`);
       return null; // 한 명만 남았으면 다음 플레이어가 없음
     }
 
@@ -668,14 +697,17 @@ export async function getNextPlayerTurn(
       (p) => p.id === currentPlayerId
     );
 
+    console.log(`[getNextPlayerTurn] 현재 플레이어 인덱스: ${currentIndex}, ID: ${currentPlayerId}`);
+
     if (currentIndex === -1) {
+      console.log(`[getNextPlayerTurn] 현재 플레이어가 주요 플레이어 목록에 없음, 첫 번째 활성 플레이어 사용: ${activePlayers[0].id}`);
       return activePlayers[0].id; // 현재 플레이어가 목록에 없으면 첫 번째 활성 플레이어
     }
 
     // 다음 플레이어 계산 (순환)
     const nextIndex = (currentIndex + 1) % activePlayers.length;
     const nextPlayerId = activePlayers[nextIndex].id;
-    console.log(`[getNextPlayerTurn] 다음 플레이어 ID: ${nextPlayerId}`);
+    console.log(`[getNextPlayerTurn] 다음 플레이어 계산: 현재 인덱스 ${currentIndex} -> 다음 인덱스 ${nextIndex}, ID: ${nextPlayerId}`);
     return nextPlayerId;
   } catch (error) {
     console.error("[getNextPlayerTurn] Error:", error);
