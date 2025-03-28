@@ -159,8 +159,7 @@ export async function createRoom(
       user_id: playerId, // 생성된 playerId 사용
       username,
       balance: userBalance, // 잔액은 게임 시작 시에만 변경됨
-      is_die: false, // 누락 필드 추가
-      folded: false, // 누락 필드 추가
+      is_die: false, // 폴드 여부
       seat_index: 0, // 방장은 0번 자리에 배치
       is_ready: true, // 방장은 항상 준비됨
       last_heartbeat: new Date().toISOString(), // 누락 필드 추가
@@ -226,8 +225,7 @@ export async function joinRoom(
       user_id: playerId, // 생성된 playerId 사용
       username: username,
       balance: userBalance, // 방 입장은 무료로 변경
-      is_die: false, // 누락 필드 추가
-      folded: false, // 누락 필드 추가
+      is_die: false, // 폴드 여부
       seat_index: seatIndex !== undefined ? seatIndex : null,
       is_ready: false, // 준비 상태 기본값 false
       last_heartbeat: new Date().toISOString(), // 누락 필드 추가
@@ -406,7 +404,7 @@ export async function getRoomPlayers(roomId: string): Promise<Player[]> {
         `
         id, user_id, username, balance, room_id, cards, open_card, selected_cards,
         is_die, seat_index, is_ready, game_id, is_muted, last_action,
-        last_action_time, last_heartbeat, has_acted, folded, created_at, updated_at
+        last_action_time, last_heartbeat, has_acted, created_at, updated_at
       `
       ) // 명시적으로 컬럼 지정
       .eq("room_id", roomId);
