@@ -844,6 +844,7 @@ async function checkRoundCompletion(gameId: string): Promise<boolean> {
       );
 
       console.log(`[checkRoundCompletion] 라운드 종료 처리 완료`);
+      await endGame(gameId); // 게임 종료 처리 호출 추가
       return true;
     }
 

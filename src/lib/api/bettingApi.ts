@@ -473,9 +473,6 @@ export async function endRound(gameId: string): Promise<void> {
 
     // 게임 상태 업데이트
     const newRound = (game.round || 1) + 1;
-    // 한 명만 남았을 때는 게임을 완전히 종료 상태로 설정
-    const isGameFinished = activePlayers.length === 1;
-    
     const { error: updateGameError } = await supabase
       .from("games")
       .update({
@@ -486,8 +483,8 @@ export async function endRound(gameId: string): Promise<void> {
           ? `${winnerUsername} won the pot (${game.pot} chips)`
           : "Round ended",
         last_winner_id: winnerId,
-        status: isGameFinished ? 'finished' : game.status,
-        winner: isGameFinished ? winnerId : null
+        status: 'finished',
+        winner: winnerId
       })
       .eq("id", gameId);
 
@@ -507,9 +504,6 @@ export async function endRound(gameId: string): Promise<void> {
     if (resetPlayersError) {
       throw handleDatabaseError(resetPlayersError, "플레이어 상태 초기화 실패");
     }
-
-    // 새 라운드 시작 및 카드 배분
-    await dealNewRound(gameId);
   } catch (error) {
     console.error("[endRound] Error:", error);
   }
