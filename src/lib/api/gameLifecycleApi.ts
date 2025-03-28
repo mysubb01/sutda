@@ -11,6 +11,8 @@ import { evaluateCards, determineWinner } from '@/utils/gameLogic';
  */
 export async function startDebugGame(gameId: string): Promise<void> {
   try {
+    console.log(`[INFO] [game] 디버그 게임 시작 요청: ${gameId}`);
+    
     // 게임 정보 조회
     const { data: gameData, error: gameError } = await supabase
       .from('games')
@@ -19,7 +21,14 @@ export async function startDebugGame(gameId: string): Promise<void> {
       .single();
 
     if (gameError || !gameData) {
+      console.error(`[ERROR] [game] 게임 정보 조회 실패:`, gameError);
       throw handleResourceNotFoundError('game', gameId, gameError);
+    }
+
+    console.log(`[INFO] [game] 게임 상태 확인 - 현재: ${gameData.status}`);
+    if (gameData.status === 'playing') {
+      console.log(`[INFO] [game] 이미 진행 중인 게임입니다`);
+      return; // 이미 게임이 진행 중인 경우 조기 종료
     }
 
     const roomData = gameData.rooms;
@@ -34,11 +43,13 @@ export async function startDebugGame(gameId: string): Promise<void> {
       .eq('is_active', true);
 
     if (playersError) {
+      console.error(`[ERROR] [game] 플레이어 정보 조회 실패:`, playersError);
       throw handleDatabaseError(playersError, 'startDebugGame:players');
     }
     
     // 타입을 명시적으로 지정하여 린트 오류 방지
     const playerCount = playersData ? playersData.length : 0;
+    console.log(`[INFO] [game] 디버그 게임 시작: ${playerCount}명 참가, ${gameMode === 'triple' ? 3 : 2}장 모드`);
 
     // 디버그 모드에서는 플레이어 수 제한을 검사하지 않음
     // 덱 생성 및 카드 분배
@@ -55,7 +66,7 @@ export async function startDebugGame(gameId: string): Promise<void> {
       }
       
       // 카드 저장
-      await supabase
+      const { error: updatePlayerError } = await supabase
         .from('players')
         .update({ 
           cards: playerCards,
@@ -67,6 +78,10 @@ export async function startDebugGame(gameId: string): Promise<void> {
           updated_at: new Date().toISOString()
         })
         .eq('id', player.id);
+        
+      if (updatePlayerError) {
+        console.error(`[ERROR] [game] 플레이어 ${player.id} 카드 업데이트 실패:`, updatePlayerError);
+      }
     }
 
     // 시작 플레이어 랜덤 결정
@@ -74,7 +89,8 @@ export async function startDebugGame(gameId: string): Promise<void> {
     const startPlayerId = playersData[startPlayerIndex].id;
     
     // 게임 상태 업데이트 (여기서 명시적으로 'playing'으로 설정)
-    const { error: updateGameError } = await supabase
+    console.log(`[INFO] [game] 게임 상태 'playing'으로 업데이트 시작`);
+    const { data: updateData, error: updateGameError } = await supabase
       .from('games')
       .update({
         status: 'playing', // 중요: 게임 상태를 'playing'으로 명시적 설정
@@ -85,16 +101,41 @@ export async function startDebugGame(gameId: string): Promise<void> {
         updated_at: new Date().toISOString(),
         round: 1
       })
-      .eq('id', gameId);
+      .eq('id', gameId)
+      .select();
       
     if (updateGameError) {
+      console.error(`[ERROR] [game] 게임 상태 업데이트 실패:`, updateGameError);
       throw handleDatabaseError(updateGameError, 'startDebugGame:game update');
     }
+    
+    console.log(`[INFO] [game] 게임 상태 업데이트 성공: ${JSON.stringify({ gameId, status: 'playing' })}`);
+    
+    // 업데이트 확인
+    const { data: verifyData, error: verifyError } = await supabase
+      .from('games')
+      .select('status')
+      .eq('id', gameId)
+      .single();
+      
+    if (verifyError) {
+      console.error(`[ERROR] [game] 게임 상태 확인 실패:`, verifyError);
+    } else {
+      console.log(`[INFO] [game] 게임 상태 확인 결과: ${verifyData.status}`);
+      if (verifyData.status !== 'playing') {
+        console.error(`[ERROR] [game] 게임 상태가 'playing'으로 업데이트되지 않았습니다: ${verifyData.status}`);
+      }
+    }
 
-    // 게임 시작 로그 기록 - 명시적 변수 사용으로 해결
-    await logGameStart(gameId, playerCount, cardCount);
+    // 게임 시작 로그 기록
+    await logGameStart(gameId, playersData.map(p => p.id), {
+      type: 'debug',
+      playerCount,
+      gameMode: cardCount
+    });
     
   } catch (error) {
+    console.error(`[ERROR] [game] 디버그 게임 시작 중 오류:`, error);
     await logSystemError(gameId, 'startDebugGame', error);
     throw handleGameError(error, ErrorType.INVALID_STATE, 'startDebugGame');
   }
@@ -148,46 +189,46 @@ export async function startGame(gameId: string, playerId?: string): Promise<{ su
     const deck = createShuffledDeck();
     
     // 2장 모드와 3장 모드에 따라 다르게 처리
-    if (gameMode === 2) {
-      // 2장 모드: 플레이어당 2장씩 배분
-      for (let i = 0; i < playersData.length; i++) {
-        const playerCards = [deck.pop()!, deck.pop()!];
-        
-        await supabase
-          .from('players')
-          .update({ 
-            cards: playerCards,
-            is_die: false 
-          })
-          .eq('id', playersData[i].id);
-      }
-    } else if (gameMode === 3) {
-      // 3장 모드: 플레이어당 2장씩 먼저 배분 (모두 비공개)
-      for (let i = 0; i < playersData.length; i++) {
-        const playerCards = [deck.pop()!, deck.pop()!];
-        
-        await supabase
-          .from('players')
-          .update({ 
-            cards: playerCards,
-            reserved_card: null, // 예비 카드 초기화
-            is_die: false 
-          })
-          .eq('id', playersData[i].id);
+    const cardCount = gameMode === 3 ? 3 : 2;
+    console.log(`[startGame] 카드 배분 시작: ${playersData.length}명, ${cardCount}장 모드`);
+
+    // 각 플레이어에게 카드 분배
+    for (let i = 0; i < playersData.length; i++) {
+      // deck에서 필요한 수만큼 카드 가져오기
+      const playerCards = [];
+      for (let j = 0; j < cardCount; j++) {
+        const card = deck.pop();
+        // deck이 비어있는 경우 방어 코드
+        if (card === undefined) {
+          console.error(`[startGame] 덱이 비어있습니다. 플레이어: ${i}, 카드: ${j}`);
+          throw handleGameError(
+            new Error('카드 덱이 비어있습니다.'),
+            ErrorType.INVALID_STATE,
+            '게임 시작 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.'
+          );
+        }
+        playerCards.push(card);
       }
       
-      // 남은 카드를 예비 카드로 저장
-      const reservedCards: Record<string, number> = {};
-      for (let i = 0; i < playersData.length; i++) {
-        reservedCards[playersData[i].id] = deck.pop()!;
-      }
+      console.log(`[startGame] 플레이어 ${playersData[i].id}에게 카드 할당: ${JSON.stringify(playerCards)}`);
       
-      // 각 플레이어의 예비 카드 저장
-      for (const playerId in reservedCards) {
-        await supabase
+      // 플레이어 카드 업데이트
+      try {
+        const { error } = await supabase
           .from('players')
-          .update({ reserved_card: reservedCards[playerId] })
-          .eq('id', playerId);
+          .update({
+            cards: playerCards,
+            is_die: false  // 플레이어 활성 상태 설정
+          })
+          .eq('id', playersData[i].id);
+          
+        if (error) {
+          console.error(`[startGame] 플레이어 ${playersData[i].id} 카드 업데이트 오류:`, error);
+          throw handleDatabaseError(error, `startGame: 플레이어 ${playersData[i].id} 카드 업데이트`);
+        }
+      } catch (error) {
+        console.error(`[startGame] 카드 업데이트 중 예외 발생:`, error);
+        throw error;
       }
     }
     
@@ -196,39 +237,72 @@ export async function startGame(gameId: string, playerId?: string): Promise<{ su
     const startPlayerId = playersData[startPlayerIndex].id;
     
     // 게임 상태 업데이트 - 실제 DB 스키마에 존재하는 필드만 사용
-    const { error: updateGameError } = await supabase
+    console.log(`[startGame] 게임 상태 업데이트: ${gameId}, 상태 'playing'으로 변경`);
+    const { data: updateData, error: updateGameError } = await supabase
       .from('games')
       .update({
         status: 'playing',
+        current_turn: startPlayerId, // current_turn 필드 사용
         current_player_id: startPlayerId, // 프론트엔드 호환성 위해 current_player_id 사용
-        current_bet_amount: baseBet, // betting_value -> current_bet_amount
-        pot: baseBet * playersData.length, // total_pot -> pot
+        betting_value: baseBet, // 베팅값 필드
+        total_pot: baseBet * playersData.length, // 총 팟
+        pot: baseBet * playersData.length, // 총 팟 (total_pot과 동일하지만 호환성 위해)
         updated_at: new Date().toISOString(),
-        round: 1 // betting_round -> round
+        betting_round: 1, // betting_round 필드
+        round: 1 // 호환성을 위한 round 필드
       })
-      .eq('id', gameId);
+      .eq('id', gameId)
+      .select();
       
     if (updateGameError) {
       throw handleDatabaseError(updateGameError, 'startGame: game update');
     }
     
     // 모든 플레이어 초기 상태 설정 및 기본 베팅
+    console.log(`[startGame] 플레이어 상태 업데이트 (${playersData.length}명)`);
     for (const player of playersData) {
-      await supabase
-        .from('players')
-        .update({
-          is_ready: false,
-          is_die: false, // folded -> is_die
-          current_bet: baseBet,
-          has_acted: false,
-          balance: player.balance - baseBet,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', player.id);
+      try {
+        const { error } = await supabase
+          .from('players')
+          .update({
+            is_ready: false,
+            is_die: false,
+            // is_die 필드만 사용
+            current_bet: baseBet,
+            has_acted: false,
+            balance: player.balance - baseBet,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', player.id);
+          
+        if (error) {
+          console.error(`[startGame] 플레이어 ${player.id} 상태 업데이트 오류:`, error);
+          throw handleDatabaseError(error, `startGame: 플레이어 ${player.id} 상태 업데이트`);
+        }
+      } catch (error) {
+        console.error(`[startGame] 플레이어 상태 업데이트 중 예외 발생:`, error);
+        throw error;
+      }
+    }
+    
+    // 게임 상태 확인
+    const { data: verifyData, error: verifyError } = await supabase
+      .from('games')
+      .select('status')
+      .eq('id', gameId)
+      .single();
+      
+    if (verifyError) {
+      console.error(`[startGame] 게임 상태 확인 실패:`, verifyError);
+    } else {
+      console.log(`[startGame] 게임 상태 확인 결과: ${verifyData.status}`);
+      if (verifyData.status !== 'playing') {
+        console.error(`[startGame] 게임 상태가 'playing'으로 업데이트되지 않았습니다: ${verifyData.status}`);
+      }
     }
     
     // 게임 시작 로그 기록
-    await logGameStart(gameId, playersData.length, gameMode === 'triple' ? 3 : 2);
+    await logGameStart(gameId, playersData.length, gameMode === 3 ? 3 : 2);
     
     // 성공 결과 반환
     return { success: true };
@@ -406,7 +480,6 @@ export async function handleRegame(gameId: string): Promise<void> {
         .from('players')
         .update({
           is_ready: false,
-          folded: false,
           current_bet: 0,
           has_acted: false,
           cards: [],
@@ -490,7 +563,6 @@ export async function cleanupAfterGameFinish(gameId: string): Promise<void> {
       .from('players')
       .update({
         is_ready: false,
-        folded: false,
         current_bet: 0,
         has_acted: false,
         cards: [],

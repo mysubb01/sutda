@@ -256,7 +256,7 @@ export async function getGamePlayers(gameId: string): Promise<Player[]> {
         `
         id, user_id, username, balance, room_id, cards, open_card, selected_cards,
         is_die, seat_index, is_ready, game_id, is_muted, last_action,
-        last_action_time, last_heartbeat, has_acted, folded, created_at, updated_at
+        last_action_time, last_heartbeat, has_acted, created_at, updated_at
       `
       ) // 명시적으로 컬럼 지정
       .eq("game_id", gameId)
@@ -297,7 +297,7 @@ export async function getPlayer(playerId: string): Promise<Player> {
         `
         id, user_id, username, balance, room_id, cards, open_card, selected_cards,
         is_die, seat_index, is_ready, game_id, is_muted, last_action,
-        last_action_time, last_heartbeat, has_acted, folded, created_at, updated_at
+        last_action_time, last_heartbeat, has_acted, created_at, updated_at
       `
       ) // 명시적으로 컬럼 지정
       .eq("id", playerId)

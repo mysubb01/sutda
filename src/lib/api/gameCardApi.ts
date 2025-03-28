@@ -53,7 +53,7 @@ export async function selectFinalCards(
     // 플레이어 정보 조회
     const { data: player, error: playerError } = await supabase
       .from('players')
-      .select('username, cards, reserved_card, folded')
+      .select('username, cards, reserved_card, is_die')
       .eq('id', playerId)
       .eq('game_id', gameId)
       .single();
@@ -63,7 +63,7 @@ export async function selectFinalCards(
     }
     
     // 이미 폴드한 경우
-    if (player.folded) {
+    if (player.is_die) {
       throw handleGameError(
         new Error('이미 폴드했습니다'),
         ErrorType.INVALID_STATE,
@@ -86,11 +86,11 @@ export async function selectFinalCards(
     }
     
     // 선택한 카드 검증
-    if (selectedCards.length !== 2) {
+    if (selectedCards.length < 2 || selectedCards.length > 3) {
       throw handleGameError(
         new Error('선택한 카드 수가 잘못되었습니다'),
-        ErrorType.VALIDATION_ERROR,
-        '정확히 2장의 카드를 선택해야 합니다'
+        ErrorType.VALIDATION,
+        '2장 또는 3장의 카드를 선택해야 합니다'
       );
     }
     
@@ -100,7 +100,7 @@ export async function selectFinalCards(
     if (!allValid) {
       throw handleGameError(
         new Error('선택한 카드가 유효하지 않습니다'),
-        ErrorType.VALIDATION_ERROR,
+        ErrorType.VALIDATION,
         '선택한 카드 중 일부가 플레이어의 카드가 아닙니다'
       );
     }
@@ -131,14 +131,14 @@ export async function selectFinalCards(
     // 모든 플레이어가 카드를 선택했는지 확인
     const { data: allPlayers, error: allPlayersError } = await supabase
       .from('players')
-      .select('id, has_acted, folded')
+      .select('id, has_acted, is_die')
       .eq('game_id', gameId);
     
     if (allPlayersError) {
       throw handleDatabaseError(allPlayersError, 'selectFinalCards: check all players');
     }
     
-    const activePlayers = allPlayers.filter(p => !p.folded);
+    const activePlayers = allPlayers.filter(p => !p.is_die);
     const allActed = activePlayers.every(p => p.has_acted);
     
     if (allActed) {
@@ -187,10 +187,10 @@ export async function autoSelectFinalCards(gameId: string): Promise<void> {
     // 카드를 선택하지 않은 활성 플레이어 조회
     const { data: unselectedPlayers, error: playerError } = await supabase
       .from('players')
-      .select('id, username, cards, reserved_card, folded, has_acted')
+      .select('id, username, cards, reserved_card, is_die, has_acted')
       .eq('game_id', gameId)
       .eq('has_acted', false)
-      .eq('folded', false);
+      .eq('is_die', false);
     
     if (playerError) {
       throw handleDatabaseError(playerError, 'autoSelectFinalCards: players');

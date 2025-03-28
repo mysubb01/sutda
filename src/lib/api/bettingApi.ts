@@ -167,7 +167,7 @@ export async function processBetting(
 
       case BettingAction.FOLD:
         // 폴드 처리
-        nextAction = "folded";
+        nextAction = "is_die";
         break;
 
       case BettingAction.ALLIN:
@@ -280,7 +280,7 @@ export async function getNextPlayerTurn(
     // 현재 게임의 활성 플레이어 목록 조회
     const { data: players, error } = await supabase
       .from("players")
-      .select("id, seat_index, folded, chips")
+      .select("id, seat_index, is_die, chips")
       .eq("game_id", gameId)
       .eq("is_playing", true)
       .order("seat_index", { ascending: true });
@@ -298,7 +298,7 @@ export async function getNextPlayerTurn(
     }
 
     // 폴드하지 않고 칩이 있는 플레이어만 필터링
-    const activePlayers = players.filter((p) => !p.folded && p.chips > 0);
+    const activePlayers = players.filter((p) => !p.is_die && p.chips > 0);
 
     if (activePlayers.length <= 1) {
       // 활성 플레이어가 1명 이하면 게임 종료 처리 필요
@@ -346,7 +346,7 @@ export async function checkRoundCompletion(gameId: string): Promise<void> {
     // 플레이어 배팅 상태 조회
     const { data: players, error: playersError } = await supabase
       .from("players")
-      .select("id, current_bet, folded, chips")
+      .select("id, current_bet, is_die, chips")
       .eq("game_id", gameId)
       .eq("is_playing", true);
 
@@ -355,7 +355,7 @@ export async function checkRoundCompletion(gameId: string): Promise<void> {
     }
 
     // 활성 플레이어 (폴드하지 않은 플레이어)
-    const activePlayers = players.filter((p) => !p.folded);
+    const activePlayers = players.filter((p) => !p.is_die);
 
     // 모든 플레이어가 폴드했거나 한 명만 남은 경우 게임 종료
     if (activePlayers.length <= 1) {
@@ -403,7 +403,7 @@ export async function endRound(gameId: string): Promise<void> {
     // 활성 플레이어 조회
     const { data: players, error: playersError } = await supabase
       .from("players")
-      .select("id, username, cards, folded, chips")
+      .select("id, username, cards, is_die, chips")
       .eq("game_id", gameId)
       .eq("is_playing", true);
 
@@ -412,7 +412,7 @@ export async function endRound(gameId: string): Promise<void> {
     }
 
     // 폴드하지 않은 플레이어만 필터링
-    const activePlayers = players.filter((p) => !p.folded);
+    const activePlayers = players.filter((p) => !p.is_die);
 
     // 승자 결정
     let winnerId: string | null = null;
@@ -510,7 +510,7 @@ export async function dealNewRound(gameId: string): Promise<void> {
       .select("id")
       .eq("game_id", gameId)
       .eq("is_playing", true)
-      .eq("folded", false)
+      .eq("is_die", false)
       .gt("chips", 0);
 
     if (playersError) {
@@ -533,7 +533,7 @@ export async function dealNewRound(gameId: string): Promise<void> {
         .from("players")
         .update({
           cards: cards,
-          folded: false,
+          is_die: false,
         })
         .eq("id", players[i].id);
 
@@ -678,7 +678,7 @@ export async function handleBettingTimeout(
     // 타임아웃 발생시 자동 폴드 처리
     await processBetting(gameId, playerId, BettingAction.FOLD, 0);
     console.log(
-      `[handleBettingTimeout] Auto-folded player ${playerId} due to timeout`
+      `[handleBettingTimeout] Auto-is_die player ${playerId} due to timeout`
     );
   } catch (error) {
     console.error(`[handleBettingTimeout] Error processing timeout:`, error);

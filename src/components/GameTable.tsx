@@ -594,12 +594,12 @@ export function GameTable({
                       
                       await import('@/lib/gameApi').then(async ({ placeBet }) => {
                         try {
-                          await placeBet(gameId, currentPlayerId, 'die');
-                          console.log('시간 초과로 인한 자동 다이 처리 완료');
-                          toast.success('시간 초과로 자동 다이 처리되었습니다.');
+                          await placeBet(gameId, currentPlayerId, 'fold');
+                          console.log('시간 초과로 인한 자동 폴드 처리 완료');
+                          toast.success('시간 초과로 자동 폴드 처리되었습니다.');
                         } catch (betError: any) {
-                          console.error('다이 처리 오류:', betError);
-                          toast.error('다이 처리 중 오류가 발생했습니다.');
+                          console.error('폴드 처리 오류:', betError);
+                          toast.error('폴드 처리 중 오류가 발생했습니다.');
                         }
                       });
                     }

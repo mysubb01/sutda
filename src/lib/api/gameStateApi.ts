@@ -38,7 +38,7 @@ export async function getGameState(gameId: string): Promise<GameState> {
         players(
           id, user_id, username, balance, room_id, cards, open_card, selected_cards,
           is_die, seat_index, is_ready, game_id, is_muted, last_action,
-          last_action_time, last_heartbeat, has_acted, folded, created_at, updated_at
+          last_action_time, last_heartbeat, has_acted, created_at, updated_at
         )
       `
       )

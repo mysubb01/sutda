@@ -258,6 +258,8 @@ export async function betAction(
     let newBalance = currentPlayer.balance;
     let actionDescription = '';
     
+    console.log(`[베팅액션] 처리중: 게임 ${gameId}, 플레이어 ${playerId}, 액션 ${action}, 금액 ${amount}`);
+
     switch (action) {
       case 'check':
         // 체크는 이전에 베팅이 없을 때만 가능
@@ -290,6 +292,77 @@ export async function betAction(
         
         newBalance = currentPlayer.balance - betAmount;
         actionDescription = `콜: ${betAmount}`;
+        break;
+
+      // 추가: 기본 베팅 처리
+      case 'bet':
+        // 기본 베팅 (amount가 없으면 기본 베팅액 사용)
+        betAmount = amount || game.base_bet || 100;
+        
+        if (betAmount <= 0) {
+          throw handleGameError(
+            new Error('유효하지 않은 베팅 금액'),
+            ErrorType.VALIDATION,
+            '베팅 금액은 0보다 커야 합니다'
+          );
+        }
+        
+        if (betAmount > currentPlayer.balance) {
+          throw handleGameError(
+            new Error('잔액이 부족합니다'),
+            ErrorType.VALIDATION,
+            '잔액이 부족합니다'
+          );
+        }
+        
+        newBalance = currentPlayer.balance - betAmount;
+        actionDescription = `베팅: ${betAmount}`;
+        break;
+
+      // 추가: 하프 (현재 팟의 하프)
+      case 'half':
+        // 하프 베팅 (현재 팟의 절반)
+        const halfAmount = Math.floor((game.total_pot || 0) / 2);
+        betAmount = halfAmount > 0 ? halfAmount : (game.base_bet || 100);
+        
+        if (betAmount <= 0) {
+          throw handleGameError(
+            new Error('유효하지 않은 하프 금액'),
+            ErrorType.VALIDATION,
+            '하프 금액이 계산되지 않았습니다'
+          );
+        }
+        
+        if (betAmount > currentPlayer.balance) {
+          // 잔액이 부족하면 올인
+          betAmount = currentPlayer.balance;
+        }
+        
+        newBalance = currentPlayer.balance - betAmount;
+        actionDescription = `하프: ${betAmount}`;
+        break;
+
+      // 추가: 1/4 베팅
+      case 'quarter':
+        // 1/4 베팅 (현재 팟의 1/4)
+        const quarterAmount = Math.floor((game.total_pot || 0) / 4);
+        betAmount = quarterAmount > 0 ? quarterAmount : (game.base_bet || 100);
+        
+        if (betAmount <= 0) {
+          throw handleGameError(
+            new Error('유효하지 않은 쿼터 금액'),
+            ErrorType.VALIDATION,
+            '쿼터 금액이 계산되지 않았습니다'
+          );
+        }
+        
+        if (betAmount > currentPlayer.balance) {
+          // 잔액이 부족하면 올인
+          betAmount = currentPlayer.balance;
+        }
+        
+        newBalance = currentPlayer.balance - betAmount;
+        actionDescription = `쿼터: ${betAmount}`;
         break;
         
       case 'raise':
@@ -330,13 +403,15 @@ export async function betAction(
         newBalance = currentPlayer.balance - betAmount;
         actionDescription = `레이즈: ${betAmount} (총 ${finalBetAmount})`;
         break;
-        
+
+      // 테이블/DB 호환성을 위해 fold 와 die 를 둘 다 지원
       case 'fold':
-        // 폴드는 베팅 없이 게임에서 빠지기
+        // 폴드/다이는 베팅 없이 게임에서 빠지기
         actionDescription = '폴드';
         break;
         
       default:
+        console.error(`지원되지 않는 베팅 액션: ${action}`)
         throw handleGameError(
           new Error(`유효하지 않은 베팅 액션: ${action}`),
           ErrorType.VALIDATION,
@@ -353,13 +428,19 @@ export async function betAction(
     };
     
     // 폴드가 아닌 경우 베팅액과 잔액 업데이트
-    if (action === 'check' || action === 'call' || action === 'raise') {
-      playerUpdate.current_bet = action === 'check' 
-        ? currentPlayer.current_bet 
-        : Math.max(maxBet, amount);
-      playerUpdate.balance = newBalance; // 프론트엔드와 호환성 위해 balance 사용
-    } else { // fold 액션은 별도 처리
-      playerUpdate.is_die = true; // folded -> is_die로 변경
+    if (action === 'fold') { 
+      // 폴드 액션 처리
+      playerUpdate.is_die = true; // is_die로 설정
+    } else { 
+      // 다른 베팅 액션들 처리 (체크, 콜, 레이즈, 베팅, 하프, 쿼터)
+      // 체크는 예외적으로 현재 베팅을 유지
+      if (action === 'check') {
+        playerUpdate.current_bet = currentPlayer.current_bet || 0;
+      } else {
+        // 나머지 액션은 베팅액 및 잔액 업데이트
+        playerUpdate.current_bet = Math.max(maxBet, amount);
+        playerUpdate.balance = newBalance;
+      }
     }
     
     const { error: updatePlayerError } = await supabase
@@ -446,7 +527,7 @@ export async function betAction(
     }
     
     const allMatched = await checkAllPlayersMatchedBet(gameId, updatedPlayers);
-    const activePlayers = updatedPlayers.filter(p => !p.folded);
+    const activePlayers = updatedPlayers.filter(p => !p.is_die);
     
     if (allMatched || activePlayers.length <= 1) {
       await finishBettingRound(gameId);
