@@ -26,8 +26,10 @@ import * as gameCardFunctions from './gameCardApi';
 export { gameCardFunctions };
 
 // 베팅 관련 함수
-import { BettingAction, processBetting } from './bettingApi';
-export { BettingAction, processBetting };
+import { BettingActionValue, processBetting } from './bettingApi';
+import type { BettingActionValue as BettingActionType } from './bettingApi';
+export { processBetting };
+export type { BettingActionType as BettingAction };
 import * as gameBettingFunctions from './gameBettingApi';
 export { gameBettingFunctions };
 

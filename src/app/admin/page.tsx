@@ -624,7 +624,9 @@ export default function AdminPage() {
                         <div className="text-sm font-medium text-green-700">{player.balance.toLocaleString()}원</div>
                       </td>
                       <td className="py-3 px-4">
-                        <div className="text-sm text-gray-900">{new Date(player.created_at).toLocaleString()}</div>
+                        <div className="text-sm text-gray-900">
+                          {player.created_at ? new Date(player.created_at).toLocaleString() : '-'}
+                        </div>
                       </td>
                       <td className="py-3 px-4">
                         <div className="flex space-x-2">
