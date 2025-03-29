@@ -29,6 +29,7 @@ export async function getGameState(gameId: string): Promise<GameState> {
         betting_value,
         total_pot,
         base_bet,
+        blind_amount,
         betting_round,
         game_mode,
         betting_end_time,
@@ -91,6 +92,9 @@ export async function getGameState(gameId: string): Promise<GameState> {
       pot: data.total_pot || 0,
       round: data.betting_round,
       mode: data.game_mode,
+      bettingRules: {
+        blind_amount: data.blind_amount || 0,
+      },
     };
 
     // 추가 정보 조회 (메시지, 액션 등)
