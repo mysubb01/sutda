@@ -322,13 +322,14 @@ export function GameControls({ gameState, currentPlayerId, onAction }: GameContr
     const blindAmount = gameState.bettingRules.blind_amount || 100; 
     const result = getAvailableBettingActions({
       gameState: {
-        current_bet_amount: gameState.bettingValue || 0,
+        bettingValue: gameState.bettingValue || 0, // current_bet_amount -> bettingValue
         pot: gameState.pot || 0,
-        bettingRules: gameState.bettingRules
+        bettingRules: gameState.bettingRules,
+        baseBet: gameState.baseBet || 0, // baseBet 추가
       },
       playerState: {
         current_bet: currentPlayer.current_bet || 0,
-        chips: currentPlayer.balance || 0,
+        balance: currentPlayer.balance || 0, // chips -> balance
         is_die: currentPlayer.is_die || false 
       }
     });
