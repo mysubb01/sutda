@@ -233,11 +233,18 @@ export async function autoSelectFinalCards(gameId: string): Promise<void> {
         .eq('id', player.id);
       
       // 로그 기록
-      await logCardAction(gameId, player.id, 'auto_select_cards', {
-        selected: bestCombination,
-        all_cards: allCards,
-        auto: true
-      });
+      await logInfo(
+        gameId,
+        'cards', 
+        `카드 액션: ${player.id}의 auto_select_cards`, 
+        player.id, 
+        { 
+          action: 'auto_select_cards',
+          selectedCards: bestCombination,
+          allCards: allCards,
+          auto: true
+        }
+      );
       
       console.log(`[autoSelectFinalCards] 플레이어 ${player.username}의 카드 자동 선택: ${bestCombination}`);
     }
@@ -274,10 +281,14 @@ async function prepareGameEnd(gameId: string): Promise<void> {
       .eq('id', gameId);
     
     // 로그 기록
-    await logCardAction(gameId, 'system', 'prepare_end', {
-      message: '모든 플레이어가 카드를 선택했습니다. 게임이 종료됩니다.'
-    });
-    
+    await logInfo(
+      gameId,
+      'system', // category
+      '게임 종료 준비 완료', // message
+      'system', // playerId
+      { action: 'prepare_end' } // metadata
+    );
+
   } catch (error: any) {
     console.error('게임 종료 준비 중 오류:', error);
     await logSystemError(gameId, 'prepareGameEnd', error);
