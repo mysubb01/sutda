@@ -4,7 +4,7 @@ import {
   handleGameError,
   ErrorType,
 } from "../utils/errorHandlers";
-import { Player, BettingRules, GameState } from "@/types";
+import { Player, BettingRules, GameState } from "@/types/game";
 
 /**
  * 배팅 관련 액션 상수 객체
@@ -64,7 +64,9 @@ export async function processBetting(
     // 게임 상태 조회
     const { data: gameData, error: gameError } = await supabase
       .from("games")
-      .select("*, room:rooms(*)")
+      .select(
+        'id, status, current_turn, winner, pot, bettingRules, betting_round, mode, base_bet, betting_value, total_pot'
+      )
       .eq("id", gameId)
       .single();
 
@@ -83,7 +85,9 @@ export async function processBetting(
     // 현재 플레이어가 유효한지 확인
     const { data: playerData, error: playerError } = await supabase
       .from("players")
-      .select("*")
+      .select(
+        'id, user_id, username, is_die, balance, current_bet, cards, open_card, selected_cards, position, seat_index, is_ready'
+      )
       .eq("id", playerId)
       .eq("game_id", gameId)
       .single();
@@ -111,14 +115,14 @@ export async function processBetting(
     }
 
     // 액션별 유효성 검사 및 처리
-    let updatedPlayerChips = playerData.chips;
+    let updatedPlayerBalance = playerData.balance;
     let updatedPot = gameData.pot || 0;
     let nextAction = "";
 
     switch (action) {
       case BETTING_ACTIONS.CALL:
         // 콜 처리
-        if (gameData.current_bet_amount <= 0) {
+        if (gameData.betting_value <= 0) {
           throw handleGameError(
             null,
             ErrorType.INVALID_STATE,
@@ -127,7 +131,7 @@ export async function processBetting(
         }
 
         // 현재 플레이어의 베팅액이 최대 베팅액과 같은 경우
-        if (playerData.current_bet >= gameData.current_bet_amount) {
+        if (playerData.current_bet >= gameData.betting_value) {
           throw handleGameError(
             null,
             ErrorType.INVALID_STATE,
@@ -136,17 +140,17 @@ export async function processBetting(
         }
 
         const callAmount = Math.min(
-          gameData.current_bet_amount - playerData.current_bet,
-          playerData.chips
+          gameData.betting_value - playerData.current_bet,
+          playerData.balance
         );
-        updatedPlayerChips -= callAmount;
+        updatedPlayerBalance -= callAmount;
         updatedPot += callAmount;
         nextAction = "called";
         break;
 
       case BETTING_ACTIONS.RAISE:
         // 레이즈 처리
-        if (amount <= gameData.current_bet_amount) {
+        if (amount <= gameData.betting_value) {
           throw handleGameError(
             null,
             ErrorType.VALIDATION,
@@ -154,7 +158,7 @@ export async function processBetting(
           );
         }
 
-        if (amount > playerData.chips) {
+        if (amount > playerData.balance) {
           throw handleGameError(
             null,
             ErrorType.VALIDATION,
@@ -162,14 +166,14 @@ export async function processBetting(
           );
         }
 
-        updatedPlayerChips -= amount;
+        updatedPlayerBalance -= amount;
         updatedPot += amount;
         nextAction = "raised";
         break;
 
       case BETTING_ACTIONS.CHECK:
         // 체크 처리
-        if (gameData.current_bet_amount > 0 && playerData.current_bet < gameData.current_bet_amount) {
+        if (gameData.betting_value > 0 && playerData.current_bet < gameData.betting_value) {
           throw handleGameError(
             null,
             ErrorType.INVALID_STATE,
@@ -186,8 +190,8 @@ export async function processBetting(
 
       case BETTING_ACTIONS.ALLIN:
         // 올인 처리
-        const allinAmount = playerData.chips;
-        updatedPlayerChips = 0;
+        const allinAmount = playerData.balance;
+        updatedPlayerBalance = 0;
         updatedPot += allinAmount;
         nextAction = "went all-in";
         break;
@@ -221,12 +225,12 @@ export async function processBetting(
     const { error: updatePlayerError } = await supabase
       .from("players")
       .update({
-        chips: updatedPlayerChips,
+        balance: updatedPlayerBalance,
         current_bet:
           action === BETTING_ACTIONS.RAISE
             ? amount
             : action === BETTING_ACTIONS.CALL
-            ? gameData.current_bet_amount
+            ? gameData.betting_value
             : playerData.current_bet,
         last_action: action,
         last_action_time: new Date().toISOString(),
@@ -249,14 +253,16 @@ export async function processBetting(
       .update({
         pot: updatedPot,
         current_turn: nextPlayerId,
-        current_bet_amount:
-          action === BETTING_ACTIONS.RAISE ? amount : gameData.current_bet_amount,
+        bettingValue:
+          action === BETTING_ACTIONS.RAISE ? amount : gameData.betting_value,
         last_action: `${playerData.username} ${nextAction} ${
           amount > 0 ? amount + " chips" : ""
         }`,
       })
       .eq("id", gameId)
-      .select("*, room:rooms(*)")
+      .select(
+        'id, status, current_turn, winner, pot, bettingRules, betting_round, mode, base_bet, betting_value, total_pot'
+      )
       .single();
 
     if (updateGameError) {
@@ -294,7 +300,7 @@ export async function getNextPlayerTurn(
     // 현재 게임의 활성 플레이어 목록 조회
     const { data: players, error } = await supabase
       .from("players")
-      .select("id, seat_index, is_die, chips")
+      .select("id, seat_index, is_die, balance")
       .eq("game_id", gameId)
       .eq("is_playing", true)
       .order("seat_index", { ascending: true });
@@ -312,7 +318,7 @@ export async function getNextPlayerTurn(
     }
 
     // 폴드하지 않고 칩이 있는 플레이어만 필터링
-    const activePlayers = players.filter((p) => !p.is_die && p.chips > 0);
+    const activePlayers = players.filter((p) => !p.is_die && p.balance > 0);
 
     if (activePlayers.length <= 1) {
       // 활성 플레이어가 1명 이하면 게임 종료 처리 필요
@@ -360,7 +366,7 @@ export async function checkRoundCompletion(gameId: string): Promise<void> {
     // 플레이어 배팅 상태 조회
     const { data: players, error: playersError } = await supabase
       .from("players")
-      .select("id, current_bet, is_die, chips")
+      .select("id, current_bet, is_die, balance")
       .eq("game_id", gameId)
       .eq("is_playing", true);
 
@@ -378,12 +384,12 @@ export async function checkRoundCompletion(gameId: string): Promise<void> {
     }
 
     // 칩이 있는 활성 플레이어
-    const playersWithChips = activePlayers.filter((p) => p.chips > 0);
+    const playersWithChips = activePlayers.filter((p) => p.balance > 0);
 
     // 모든 플레이어의 배팅 금액이 같은지 확인
-    const currentBet = game.current_bet_amount;
+    const currentBet = game.betting_value;
     const allPlayersMatchBet = playersWithChips.every(
-      (p) => p.current_bet === currentBet || p.chips === 0 // 올인한 플레이어는 예외
+      (p) => p.current_bet === currentBet || p.balance === 0 // 올인한 플레이어는 예외
     );
 
     // 모든 플레이어가 같은 금액을 배팅했다면 라운드 종료
@@ -417,7 +423,7 @@ export async function endRound(gameId: string): Promise<void> {
     // 활성 플레이어 조회
     const { data: players, error: playersError } = await supabase
       .from("players")
-      .select("id, username, cards, is_die, chips")
+      .select("id, username, cards, is_die, balance")
       .eq("game_id", gameId)
       .eq("is_playing", true);
 
@@ -463,7 +469,7 @@ export async function endRound(gameId: string): Promise<void> {
       const { error: updateWinnerError } = await supabase
         .from("players")
         .update({
-          chips: supabase.rpc("increment", { x: game.pot }),
+          balance: supabase.rpc("increment", { x: game.pot }),
           wins: supabase.rpc("increment", { x: 1 }),
         })
         .eq("id", winnerId);
@@ -480,7 +486,7 @@ export async function endRound(gameId: string): Promise<void> {
       .update({
         pot: 0,
         round: newRound,
-        current_bet_amount: 0,
+        bettingValue: 0,
         last_action: winnerId
           ? `${winnerUsername} won the pot (${game.pot} chips)`
           : "Round ended",
@@ -524,7 +530,7 @@ export async function dealNewRound(gameId: string): Promise<void> {
       .eq("game_id", gameId)
       .eq("is_playing", true)
       .eq("is_die", false)
-      .gt("chips", 0);
+      .gt("balance", 0);
 
     if (playersError) {
       throw handleDatabaseError(playersError, "플레이어 정보 조회 실패");
@@ -651,7 +657,7 @@ function transformGameState(gameData: any): GameState {
     winner: gameData.winner,
     betting_round: gameData.betting_round || 1,
     players: [], // 플레이어 정보는 별도로 로드
-    bettingRules: gameData.bettingRules || { blind_amount: 100 }, // bettingRules 추가 (기본값 포함)
+    bettingRules: gameData.bettingRules || { blind_amount: 100 },
   };
 }
 
@@ -683,8 +689,8 @@ function formatChips(amount: number): string {
 
 // getAvailableBettingActions 함수의 파라미터 타입을 위한 인터페이스 정의
 export interface GetAvailableActionsParams {
-  gameState: Pick<GameState, "current_bet_amount" | "pot" | "bettingRules">;
-  playerState: Pick<Player, "current_bet" | "chips" | "is_die">; // balance 대신 chips 사용 확인
+  gameState: Pick<GameState, "bettingValue" | "pot" | "bettingRules" | "baseBet">;
+  playerState: Pick<Player, "current_bet" | "balance" | "is_die">;
 }
 
 /**
@@ -699,24 +705,27 @@ export function getAvailableBettingActions({
   actions: BettingActionValue[];
   descriptions: { [key in BettingActionValue]?: string };
 } {
-  const { current_bet_amount } = gameState;
-  const { current_bet, chips, is_die } = playerState;
+  const { bettingValue } = gameState;
+  const { current_bet, balance, is_die } = playerState;
 
   const actions: BettingActionValue[] = [];
   const descriptions: { [key in BettingActionValue]?: string } = {};
 
-  if (is_die || chips <= 0) {
+  if (is_die || balance <= 0) {
     // 이미 죽었거나 칩이 없으면 아무 액션도 할 수 없음 (이론상 이 함수가 호출되지 않아야 함)
     return { actions: [], descriptions: {} };
   }
 
-  const canCheck = current_bet_amount === 0 || current_bet === current_bet_amount;
-  const canCall = current_bet_amount > 0 && current_bet < current_bet_amount && chips > 0;
-  const canRaise = chips > 0; // 레이즈 가능 여부는 더 구체적인 조건 필요
-  const canFold = true; // 항상 폴드 가능
-  const canAllin = chips > 0; // 칩이 있으면 항상 올인 가능 (금액은 보유 칩)
+  const currentBetToCall = bettingValue - (current_bet ?? 0);
 
-  const callAmount = Math.min(current_bet_amount - current_bet, chips);
+  // 액션 가능 여부 판단
+  const canCheck = bettingValue === 0 || (current_bet ?? 0) === bettingValue;
+  const canCall = bettingValue > 0 && (current_bet ?? 0) < bettingValue && balance > 0;
+  const canRaise = balance > 0; // 레이즈 가능 여부는 더 구체적인 조건 필요
+  const canFold = true; // 항상 폴드 가능
+  const canAllin = balance > 0; // 칩이 있으면 항상 올인 가능 (금액은 보유 칩)
+
+  const callAmount = Math.min(currentBetToCall, balance);
 
   // 체크 (Check)
   if (canCheck) {
@@ -740,26 +749,23 @@ export function getAvailableBettingActions({
   // 레이즈 가능한 최소 금액 (보통 이전 베팅액의 두 배 또는 최소 베팅 단위)
   // 여기서는 단순화를 위해 현재 베팅액보다 크고, 보유 칩 내에서 가능하다고 가정
   // 실제 게임에서는 최소 레이즈 금액 규칙(예: 이전 레이즈 금액만큼 더하기) 필요
-  const minRaiseAmount = current_bet_amount > 0 ? current_bet_amount : (gameState.bettingRules?.minBet || 1); // 최소 레이즈 금액 (예시)
-  if (canRaise && chips > (current_bet_amount - current_bet)) { // 콜 금액보다 칩이 많아야 레이즈 가능
+  const minRaiseAmount = bettingValue > 0 ? bettingValue : (gameState.baseBet ?? 0);
+  if (canRaise && balance > currentBetToCall) { // 콜 금액보다 칩이 많아야 레이즈 가능
      // 실제 레이즈 가능 조건은 더 복잡할 수 있음 (예: 최소 레이즈 금액)
      // 여기서는 단순히 콜 금액 이상의 베팅이 가능하면 레이즈 버튼을 보여줌
     actions.push(BETTING_ACTIONS.RAISE);
-    descriptions[BETTING_ACTIONS.RAISE] = `최소 ${formatChips(minRaiseAmount + (current_bet_amount - current_bet))} 이상 베팅합니다.`;
+    descriptions[BETTING_ACTIONS.RAISE] = `최소 ${formatChips(minRaiseAmount + currentBetToCall)} 이상 베팅합니다.`;
   }
-
 
   // 올인 (All-in)
   if (canAllin) {
     actions.push(BETTING_ACTIONS.ALLIN);
-    descriptions[BETTING_ACTIONS.ALLIN] = `보유한 모든 칩 (${formatChips(chips)})을 베팅합니다.`;
+    descriptions[BETTING_ACTIONS.ALLIN] = `보유한 모든 칩 (${formatChips(balance)})을 베팅합니다.`;
   }
-
 
   // 액션 순서 정렬 (예: 체크/콜, 레이즈, 폴드, 올인) - 필요에 따라 조정
    const actionOrder: BettingActionValue[] = [BETTING_ACTIONS.CHECK, BETTING_ACTIONS.CALL, BETTING_ACTIONS.RAISE, BETTING_ACTIONS.FOLD, BETTING_ACTIONS.ALLIN];
    actions.sort((a, b) => actionOrder.indexOf(a) - actionOrder.indexOf(b));
-
 
   return { actions, descriptions };
 }
